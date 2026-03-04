@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""simulation/conductor.py
+"""conductor.py
 
 Backbone orchestration script for the backward HCAL neutron campaign.
 It stitches together geometry sweeps, ddsim production, processing,
@@ -7,7 +7,7 @@ metadata writing, performance analysis, and run manifests.
 
 Example CLI
 -----------
-python3 simulation/conductor.py \
+python3 conductor.py \
     --spec geometries/sweeps/sweep000.yaml \
     --process-bin ./build/bin/process \
     --ddsim ddsim \
@@ -27,9 +27,9 @@ import sys
 from pathlib import Path
 from typing import Dict, List
 
-from helpers.geometry_index import inspect_geometry_rows, load_geometry_variants
-from helpers.run_plan import RunRecord, build_run_plans
-from helpers.run_steps import (
+from simulation.helpers.geometry_index import inspect_geometry_rows, load_geometry_variants
+from simulation.helpers.run_plan import RunRecord, build_run_plans
+from simulation.helpers.run_steps import (
     DATA_DIRECTORY,
     flatten_process_extras,
     maybe_run_sweeps,
@@ -41,7 +41,7 @@ from helpers.run_steps import (
     write_run_manifests,
 )
 
-PROJECT_DIRECTORY = Path(__file__).resolve().parents[1]
+PROJECT_DIRECTORY = Path(__file__).resolve().parent
 
 
 def parse_args() -> argparse.Namespace:

@@ -1,0 +1,24 @@
+name: sweep_lhs
+tag_prefix: lhs
+template: geometries/templates/hcal_template.xml
+detector_type: hcal
+index_base: 0
+outdir_generated: geometries/generated
+
+# Keep defaults, then override per-variant
+constants:
+  side: -z
+  dx: "100/2*cm"
+  dy: "100/2*cm"
+  zmin: "0.20*m"
+  nLayers: 10
+  t_scin: "0.40*cm"
+  t_spacer: "10*mm"
+  spacerMaterial: "Air"
+  seg1_layers: 3
+  seg2_layers: 3
+  seg3_layers: 4
+
+variants: []
+
+# python3 geometries/sweep_geometries.py --spec geometries/sweeps/template_sweep.yaml

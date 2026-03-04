@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lccdd>
+  <std_conditions type="NTP"/>
+
+  <info name="Mini Hcal"
+          title="Mini Hcal"
+          author="Aiden Wu"
+          url="https://github.com/aidenwu23/mini_detector"
+          status="development"
+          version="0.1"/>
+
+  <define>
+    <constant name="tracker_region_rmax" value="4.0*m"/>
+    <constant name="tracker_region_zmax" value="4.0*m"/>
+    <!-- World definitions -->
+    <constant name="world_dx"   value="5*m"/>
+    <constant name="world_dy"   value="5*m"/>
+    <constant name="world_dz"   value="5*m"/>
+    <!-- XY segmentation (keep your centered grid) -->
+    <constant name="cell_x"    value="10*mm"/>
+    <constant name="cell_y"    value="10*mm"/>
+    <constant name="seg_offset_x" value="0*mm"/>
+    <constant name="seg_offset_y" value="0*mm"/>
+  </define>
+
+  <!-- Bring in elements/materials from the standalone new/geometries tree -->
+  <includes>
+    <gdmlFile ref="geometries/definitions/elements.xml"/>
+    <gdmlFile ref="geometries/definitions/materials.xml"/>
+  </includes>
+
+  <limits>
+    <limitset name="cal_limits">
+      <limit name="step_length_max" particles="*" value="5" unit="mm"/>
+    </limitset>
+  </limits>
+
+  <!-- World in Air -->
+  <world material="Vacuum">
+    <shape type="Box" dx="world_dx" dy="world_dy" dz="world_dz"/>
+  </world>
+
+  <!-- Readout: trimmed fields, centered grid -->
+  <readouts>
+    <readout name="HCal_Readout">
+      <segmentation type="CartesianGridXY"
+                    grid_size_x="cell_x" grid_size_y="cell_y"
+                    offset_x="seg_offset_x" offset_y="seg_offset_y"/>
+      <!-- Keep only fields this geometry truly uses; bit-widths right-sized -->
+      <id>system:8,layer:8,slice:4,x:-16,y:-16</id>
+    </readout>
+  </readouts>
+
+  <!-- One sensitive slice using a known material from materials.xml (Polystyrene) -->
+  <detectors>
+    <detector id="200" name="HCal" type="hcal" readout="HCal_Readout" vis="HCALVis">
+      <!-- Geometry runtime uses these XML values directly. -->
+      <parameter name="dx"          value="100/2*cm"/>
+      <parameter name="dy"          value="100/2*cm"/>
+      <parameter name="zmin"        value="0.35*m"/>
+      <parameter name="side"        value="-z"/>
+      <parameter name="nLayers"     value="10"/>
+      <parameter name="t_spacer"    value="10*mm"/>
+      <parameter name="t_scin"      value="2.4*cm"/>
+      <parameter name="t_absorber"  value="4.0*cm"/>
+      <parameter name="absorberMaterial" value="StainlessSteelSAE304"/>
+      <parameter name="activeMaterial"   value="Polystyrene"/>
+      <parameter name="spacerMaterial"   value="Air"/>
+
+    </detector>
+  </detectors>
+
+  <!-- Optional: simple visuals to see the slice -->
+  <display>
+    <vis name="AbsorberVis"   alpha="0.7" r="1.0" g="0.0"  b="0.0"/>
+    <vis name="SpacerVis"     alpha="0.9" r="1.0" g="0.85" b="0.0"/>
+    <vis name="HCALVis"       alpha="0.2" r="0.2" g="0.6"  b="0.9" showDaughters="true"  visible="true"/>
+    <vis name="HCalActiveVis" alpha="0.8" r="0.6" g="0.6"  b="0.6" showDaughters="true"  visible="true"/>
+  </display>
+</lccdd>

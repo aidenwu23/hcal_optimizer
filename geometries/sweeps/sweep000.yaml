@@ -1,0 +1,33 @@
+name: sweep_lhs
+tag_prefix: lhs
+template: geometries/templates/hcal_template.xml
+detector_type: hcal
+index_base: 0
+outdir_generated: geometries/generated
+constants:
+  side: -z
+  dx: 100/2*cm
+  dy: 100/2*cm
+  zmin: 0.20*m
+  nLayers: 10
+  t_scin: 0.40*cm
+  t_spacer: 10*mm
+  spacerMaterial: Air
+  seg1_layers: 3
+  seg2_layers: 3
+  seg3_layers: 4
+variants:
+- tag: lhs000
+  t_absorber_seg1: 1.9441
+  t_scin_seg1: 0.4025
+  t_absorber_seg2: 2.1279
+  t_scin_seg2: 0.4026
+  t_absorber_seg3: 1.5441
+  t_scin_seg3: 0.4288
+- tag: lhs001
+  t_absorber_seg1: 1.2861
+  t_scin_seg1: 0.3795
+  t_absorber_seg2: 1.4252
+  t_scin_seg2: 0.3986
+  t_absorber_seg3: 1.8232
+  t_scin_seg3: 0.3731

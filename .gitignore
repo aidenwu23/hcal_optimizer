@@ -1,0 +1,45 @@
+# Build outputs
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+install_manifest.txt
+Makefile
+
+# Compiled artifacts
+*.a
+*.d
+*.dll
+*.dwo
+*.exe
+*.gch
+*.ilk
+*.la
+*.lai
+*.lib
+*.lo
+*.mod
+*.o
+*.obj
+*.out
+*.pch
+*.pdb
+*.slo
+*.smod
+*.so
+*.dylib
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Local editor settings
+.vscode/
+
+# Generated geometry outputs
+geometries/generated/
+
+# Generated run outputs
+data/raw/
+data/processed/
+data/manifests/

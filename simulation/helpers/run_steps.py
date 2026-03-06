@@ -154,6 +154,8 @@ def run_process(
     args: argparse.Namespace,
     run_plan: RunPlan,
     extra_process_flags: List[str],
+    *,
+    start_threshold_GeV: Optional[float] = None,
 ) -> Tuple[float, List[str]]:
     """Invoke the processor on the raw EDM4hep file and report elapsed time."""
     ensure_dir(run_plan.events_path.parent)
@@ -165,6 +167,8 @@ def run_process(
     ] + extra_process_flags
     if run_plan.expected_pdg is not None:
         command.extend(["--expected-pdg", str(run_plan.expected_pdg)])
+    if start_threshold_GeV is not None:
+        command.extend(["--start-threshold", f"{start_threshold_GeV:.12g}"])
     start = time.time()
     run_cmd(command, dry_run=args.dry_run, label="process")
     return time.time() - start, command

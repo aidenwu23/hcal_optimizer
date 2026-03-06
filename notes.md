@@ -28,3 +28,54 @@
   "start_layer_median": 1.0
 }
 
+start-threshold = 0.2 * muon threshold
+python3 conductor.py     --spec geometries/sweeps/sweep000.yaml     --process-bin ./build/bin/process     --ddsim ddsim     --root-bin root     --events-per-run 100     --gun-particle neutron     --gun-energy 5  --process-extra="--start-threshold 0.00465216991" --seed 67 --overwrite
+{
+  "detection_efficiency": 0.5,
+  "eff_hi": 0.04975185951049943,
+  "eff_lo": 0.04975185951049943,
+  "energy_resolution": 0.18299408894504118,
+  "frac_seg1": 0.43,
+  "frac_seg2": 0.15,
+  "frac_seg3": 0.03,
+  "geometry_id": "d87dd9ea",
+  "gun_energy_GeV": 5.0,
+  "start_definition": "first_active_layer_above_threshold",
+  "start_layer_median": 1.0
+}
+
+start-threshold = 0.1 * muon thresold
+ python3 conductor.py     --spec geometries/sweeps/sweep000.yaml     --process-bin ./build/bin/process     --ddsim ddsim     --root-bin root     --events-per-run 100     --gun-particle neutron     --gun-energy 5  --process-extra="--start-threshold 0.00232608496" --seed 67 --overwrite
+{
+  "detection_efficiency": 0.5,
+  "eff_hi": 0.04975185951049943,
+  "eff_lo": 0.04975185951049943,
+  "energy_resolution": 0.18299408894504118,
+  "frac_seg1": 0.53,
+  "frac_seg2": 0.1,
+  "frac_seg3": 0.0,
+  "geometry_id": "d87dd9ea",
+  "gun_energy_GeV": 5.0,
+  "start_definition": "first_active_layer_above_threshold",
+  "start_layer_median": 0.0
+}
+
+start-threshold = 0.3 * muon threshold
+ python3 conductor.py     --spec geometries/sweeps/sweep000.yaml     --process-bin ./build/bin/process     --ddsim ddsim     --root-bin root     --events-per-run 100     --gun-particle neutron     --gun-energy 5  --process-extra="--start-threshold 0.00697825488" --seed 67 --overwrite
+{
+  "detection_efficiency": 0.49,
+  "eff_hi": 0.049841016582496955,
+  "eff_lo": 0.0496429967805167,
+  "energy_resolution": 0.18299408894504118,
+  "frac_seg1": 0.3,
+  "frac_seg2": 0.22,
+  "frac_seg3": 0.04,
+  "geometry_id": "d87dd9ea",
+  "gun_energy_GeV": 5.0,
+  "start_definition": "first_active_layer_above_threshold",
+  "start_layer_median": 2.0
+}
+
+
+
+

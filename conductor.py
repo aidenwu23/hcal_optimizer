@@ -15,7 +15,12 @@ python3 conductor.py \
     --events-per-run 100 \
     --gun-particle neutron \
     --gun-energy 5 \
+    --start-alpha 0.2 \
+    --seed 67 \
     --overwrite
+
+start-alpha = coefficient of the threshold energy used to determine the start of a nuclear interaction, 
+default 0.2 * muon calibration threshold.
 """
 
 from __future__ import annotations
@@ -72,6 +77,12 @@ def parse_args() -> argparse.Namespace:
         help="Override the expected MC PDG code; defaults to gun particle lookup when available.",
     )
     parser.add_argument("--detect-threshold", type=float, default=0.05, help="Detection threshold (GeV) recorded in meta.json.")
+    parser.add_argument(
+        "--start-alpha",
+        type=float,
+        default=0.2,
+        help="Scale factor applied to the muon-calibrated detect threshold to derive the start-layer threshold.",
+    )
     parser.add_argument("--manifest-json", default=str(DATA_DIRECTORY / "manifests" / "run_manifest.json"), help="Path for JSON run manifest.")
     parser.add_argument("--manifest-csv", default=str(DATA_DIRECTORY / "manifests" / "run_manifest.csv"), help="Path for CSV run manifest.")
     parser.add_argument("--dry-run", action="store_true", help="Print actions without executing external commands.")
@@ -111,6 +122,10 @@ def main() -> None:
         return
 
     extra_process_flags = flatten_process_extras(args.process_extra)
+    if "--start-threshold" in extra_process_flags:
+        raise ValueError("Pass start threshold scaling with --start-alpha instead of --process-extra.")
+    if args.start_alpha <= 0.0:
+        raise ValueError("--start-alpha must be positive.")
     threshold_by_geometry_id: Dict[str, float] = {}
     gun_particle = args.gun_particle.strip().lower()
     running_muon_sample = gun_particle in ("mu-", "mu+")
@@ -144,14 +159,21 @@ def main() -> None:
         saved_detect_threshold = args.detect_threshold
 
         try:
+            resolved_start_threshold = None
             if not running_muon_sample:
                 geometry_id = run_plan.geometry_variant.geometry_id
                 if geometry_id not in threshold_by_geometry_id:
                     raise RuntimeError(f"Missing muon calibration threshold for geometry {geometry_id}")
                 args.detect_threshold = threshold_by_geometry_id[geometry_id]
+                resolved_start_threshold = args.start_alpha * args.detect_threshold
 
             run_record.ddsim_seconds = run_ddsim(args, run_plan)
-            run_record.process_seconds, _ = run_process(args, run_plan, extra_process_flags)
+            run_record.process_seconds, _ = run_process(
+                args,
+                run_plan,
+                extra_process_flags,
+                start_threshold_GeV=resolved_start_threshold,
+            )
             run_record.meta_seconds = write_metadata(args, run_plan)
             run_record.performance_seconds = run_performance_analysis(args, run_plan)
             run_record.status = "completed"

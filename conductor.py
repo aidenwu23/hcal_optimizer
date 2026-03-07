@@ -8,11 +8,11 @@ metadata writing, performance analysis, and run manifests.
 Example CLI
 -----------
 python3 conductor.py \
-    --spec geometries/sweeps/sweep000.yaml \
+    --spec geometries/sweeps/test_run.yaml \
     --process-bin ./build/bin/process \
     --ddsim ddsim \
     --root-bin root \
-    --events-per-run 1000 \
+    --events-per-run 2000 \
     --gun-particle neutron \
     --gun-energy 5 \
     --start-alpha 0.2 \

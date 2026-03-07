@@ -4,20 +4,22 @@ template: geometries/templates/hcal_template.xml
 detector_type: hcal
 index_base: 0
 outdir_generated: geometries/generated
-
-# Keep defaults, then override per-variant
 constants:
   side: -z
-  dx: "100/2*cm"
-  dy: "100/2*cm"
-  zmin: "0.20*m"
+  dx: 100/2*cm
+  dy: 100/2*cm
+  zmin: 0.20*m
   nLayers: 10
-  t_spacer: "0.1*cm"
-  spacerMaterial: "Air"
+  t_spacer: 0.1*cm
+  spacerMaterial: Air
   seg1_layers: 3
   seg2_layers: 3
   seg3_layers: 4
-
-variants: []
-
-# python3 geometries/sweep_geometries.py --spec geometries/sweeps/template_sweep.yaml
+variants:
+- tag: lhs67
+  t_absorber_seg1: 4
+  t_scin_seg1: 0.4
+  t_absorber_seg2: 4
+  t_scin_seg2: 0.4
+  t_absorber_seg3: 4
+  t_scin_seg3: 0.4

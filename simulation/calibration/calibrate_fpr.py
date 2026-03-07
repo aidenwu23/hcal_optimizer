@@ -11,8 +11,8 @@ import sys
 from pathlib import Path
 from typing import List
 
-PROJECT_DIRECTORY = Path(__file__).resolve().parents[1]
-CALIBRATION_MACRO_PATH = PROJECT_DIRECTORY / "simulation" / "analysis" / "calibrate_fpr.C"
+PROJECT_DIRECTORY = Path(__file__).resolve().parents[2]
+CALIBRATION_MACRO_PATH = PROJECT_DIRECTORY / "simulation" / "calibration" / "calibrate_fpr.C"
 DEFAULT_GUN_DIRECTION = "0 0 -1"
 DEFAULT_GUN_POSITION = "0 0 0"
 
@@ -38,7 +38,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--gun-particle", default="mu-", help="Control particle")
     parser.add_argument("--n-events", type=int, default=2000, help="Control event count")
 
-    parser.add_argument("--metric", default="sim_E", help="Metric expression in events tree")
+    parser.add_argument("--metric", default="visible_E", help="Metric expression in events tree")
     parser.add_argument("--target-fpr", type=float, default=0.01, help="Target false-positive rate")
     return parser.parse_args()
 
@@ -110,8 +110,8 @@ def main() -> int:
 
     with json_output_path.open("r", encoding="utf-8") as json_file:
         payload = json.load(json_file)
-    if payload.get("threshold_GeV") is None:
-        print("ERROR: calibration JSON missing threshold_GeV", file=sys.stderr)
+    if payload.get("muon_threshold_GeV") is None:
+        print("ERROR: calibration JSON missing muon_threshold_GeV", file=sys.stderr)
         return 4
 
     return 0

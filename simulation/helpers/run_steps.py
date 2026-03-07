@@ -83,7 +83,7 @@ def run_muon_calibration(args: argparse.Namespace, geometry_variant: GeometryVar
     json_output_path = calibration_directory / "fpr_calibration.json"
     command = [
         args.python,
-        str(SIMULATION_DIRECTORY / "calibrate_fpr.py"),
+        str(SIMULATION_DIRECTORY / "calibration" / "calibrate_fpr.py"),
         "--compact-xml",
         str(geometry_variant.xml_path),
         "--raw-out",
@@ -105,7 +105,7 @@ def run_muon_calibration(args: argparse.Namespace, geometry_variant: GeometryVar
         "--n-events",
         "2000",
         "--metric",
-        "sim_E",
+        "visible_E",
         "--target-fpr",
         "0.01",
     ]
@@ -179,11 +179,10 @@ def write_metadata(
     args: argparse.Namespace,
     run_plan: RunPlan,
 ) -> float:
-    """Write meta.json directly from conductor-owned values."""
+    """Write meta.json directly from conductor-owned run descriptors."""
     payload: Dict[str, Any] = {
         "geometry_id": run_plan.geometry_variant.geometry_id,
         "gun_energy_GeV": run_plan.gun_energy_GeV,
-        "detect_threshold_GeV": args.detect_threshold,
     }
     start = time.time()
     if args.dry_run:
@@ -197,6 +196,60 @@ def write_metadata(
 
 
 
+def write_calibration(
+    args: argparse.Namespace,
+    run_plan: RunPlan,
+    neutron_scale: Optional[float] = None,
+) -> float:
+    """Write calibration.json with the run-level calibration constants."""
+    payload: Dict[str, Any] = {
+        "muon_threshold_GeV": args.muon_threshold,
+    }
+    if neutron_scale is not None:
+        payload["neutron_scale"] = neutron_scale
+    start = time.time()
+    if args.dry_run:
+        print(f"[calibration] write {run_plan.calibration_path}")
+        return time.time() - start
+    run_plan.calibration_path.parent.mkdir(parents=True, exist_ok=True)
+    with run_plan.calibration_path.open("w", encoding="utf-8") as calibration_file:
+        json.dump(payload, calibration_file, indent=2)
+    print(f"[calibration] wrote {run_plan.calibration_path}")
+    return time.time() - start
+
+
+
+def run_neutron_calibration(
+    args: argparse.Namespace,
+    run_plan: RunPlan,
+) -> Tuple[float, Optional[float]]:
+    """Derive one neutron visible-to-truth scale from the processed events tree."""
+    calibration_path = run_plan.calibration_path
+    ensure_dir(calibration_path.parent)
+    macro_path = SIMULATION_DIRECTORY / "calibration" / "calibrate_neutron_response.C"
+    command = [
+        args.root_bin,
+        "-l",
+        "-b",
+        "-q",
+        f'{macro_path}("{run_plan.events_path}",{run_plan.gun_energy_GeV:.12g},{args.muon_threshold:.12g},"{calibration_path}")',
+    ]
+    start = time.time()
+    run_cmd(command, dry_run=args.dry_run, label="neutron_calibration")
+    elapsed = time.time() - start
+    if args.dry_run:
+        return elapsed, None
+    if not calibration_path.exists():
+        raise FileNotFoundError(f"Missing neutron calibration output: {calibration_path}")
+    with calibration_path.open("r", encoding="utf-8") as calibration_file:
+        payload = json.load(calibration_file)
+    neutron_scale = payload.get("neutron_scale")
+    if neutron_scale is None:
+        raise ValueError(f"neutron_scale missing in {calibration_path}")
+    return elapsed, float(neutron_scale)
+
+
+
 def run_performance_analysis(args: argparse.Namespace, run_plan: RunPlan) -> float:
     """Run the fixed performance analysis step for one processed run."""
     ensure_dir(run_plan.performance_path.parent)
@@ -206,7 +259,7 @@ def run_performance_analysis(args: argparse.Namespace, run_plan: RunPlan) -> flo
         "-l",
         "-b",
         "-q",
-        f'{performance_macro_path}("{run_plan.events_path}","{run_plan.meta_path}","{run_plan.performance_path}")',
+        f'{performance_macro_path}("{run_plan.events_path}","{run_plan.meta_path}","{run_plan.calibration_path}","{run_plan.performance_path}")',
     ]
     start = time.time()
     run_cmd(command, dry_run=args.dry_run, label="performance")
@@ -230,6 +283,7 @@ def write_run_manifests(run_records: List[RunRecord], json_path: Path, csv_path:
                 "raw_path": str(run_record.plan.raw_path),
                 "events_path": str(run_record.plan.events_path),
                 "meta_path": str(run_record.plan.meta_path),
+                "calibration_path": str(run_record.plan.calibration_path),
                 "performance_path": str(run_record.plan.performance_path),
                 "error": run_record.error,
             }
@@ -246,6 +300,7 @@ def write_run_manifests(run_records: List[RunRecord], json_path: Path, csv_path:
         "raw_path",
         "events_path",
         "meta_path",
+        "calibration_path",
         "performance_path",
         "error",
     ]

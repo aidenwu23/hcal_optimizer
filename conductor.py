@@ -36,9 +36,11 @@ from simulation.helpers.run_steps import (
     flatten_process_extras,
     maybe_run_sweeps,
     run_ddsim,
+    run_neutron_calibration,
     run_muon_calibration,
     run_performance_analysis,
     run_process,
+    write_calibration,
     write_metadata,
     write_run_manifests,
 )
@@ -73,7 +75,7 @@ def parse_args() -> argparse.Namespace:
         type=int,
         help="Override the expected MC PDG code; defaults to gun particle lookup when available.",
     )
-    parser.add_argument("--detect-threshold", type=float, default=0.05, help="Detection threshold (GeV) recorded in meta.json.")
+    parser.add_argument("--muon-threshold", type=float, default=0.05, help="Visible-energy threshold (GeV) used when no muon control calibration overrides it.")
     # 0.2 x muon_99th_percentile is about 2 x (event_threshold / N_layers) for this 10-layer HCAL,
     # which makes it a rough 2 x per-layer MIP threshold for the shower-start proxy.
     parser.add_argument(
@@ -125,21 +127,21 @@ def main() -> None:
         raise ValueError("Pass start threshold scaling with --start-alpha instead of --process-extra.")
     if args.start_alpha <= 0.0:
         raise ValueError("--start-alpha must be positive.")
-    threshold_by_geometry_id: Dict[str, float] = {}
+    muon_threshold_by_geometry_id: Dict[str, float] = {}
     gun_particle = args.gun_particle.strip().lower()
     running_muon_sample = gun_particle in ("mu-", "mu+")
     if not running_muon_sample:
         for geometry_variant in geometry_variants:
             calibration_json_path = run_muon_calibration(args, geometry_variant)
             if args.dry_run:
-                threshold_by_geometry_id[geometry_variant.geometry_id] = float(args.detect_threshold)
+                muon_threshold_by_geometry_id[geometry_variant.geometry_id] = float(args.muon_threshold)
                 continue
             with calibration_json_path.open("r", encoding="utf-8") as calibration_file:
                 payload = json.load(calibration_file)
-            threshold_value = payload.get("threshold_GeV")
+            threshold_value = payload.get("muon_threshold_GeV")
             if threshold_value is None:
-                raise ValueError(f"threshold_GeV missing in {calibration_json_path}")
-            threshold_by_geometry_id[geometry_variant.geometry_id] = float(threshold_value)
+                raise ValueError(f"muon_threshold_GeV missing in {calibration_json_path}")
+            muon_threshold_by_geometry_id[geometry_variant.geometry_id] = float(threshold_value)
 
     run_plans = build_run_plans(args, geometry_variants, extra_process_flags)
     if not run_plans:
@@ -155,16 +157,17 @@ def main() -> None:
             print(f"[skip] {run_plan.run_id} (events already present)")
             continue
 
-        saved_detect_threshold = args.detect_threshold
+        saved_muon_threshold = args.muon_threshold
 
         try:
             resolved_start_threshold = None
+            neutron_scale = None
             if not running_muon_sample:
                 geometry_id = run_plan.geometry_variant.geometry_id
-                if geometry_id not in threshold_by_geometry_id:
+                if geometry_id not in muon_threshold_by_geometry_id:
                     raise RuntimeError(f"Missing muon calibration threshold for geometry {geometry_id}")
-                args.detect_threshold = threshold_by_geometry_id[geometry_id]
-                resolved_start_threshold = args.start_alpha * args.detect_threshold
+                args.muon_threshold = muon_threshold_by_geometry_id[geometry_id]
+                resolved_start_threshold = args.start_alpha * args.muon_threshold
 
             run_record.ddsim_seconds = run_ddsim(args, run_plan)
             run_record.process_seconds, _ = run_process(
@@ -173,8 +176,12 @@ def main() -> None:
                 extra_process_flags,
                 start_threshold_GeV=resolved_start_threshold,
             )
+            if run_plan.gun_particle.strip().lower() == "neutron":
+                _, neutron_scale = run_neutron_calibration(args, run_plan)
             run_record.meta_seconds = write_metadata(args, run_plan)
-            run_record.performance_seconds = run_performance_analysis(args, run_plan)
+            write_calibration(args, run_plan, neutron_scale)
+            if run_plan.gun_particle.strip().lower() == "neutron":
+                run_record.performance_seconds = run_performance_analysis(args, run_plan)
             run_record.status = "completed"
         except subprocess.CalledProcessError as exc:
             run_record.status = "failed"
@@ -183,7 +190,7 @@ def main() -> None:
             run_record.status = "failed"
             run_record.error = str(exc)
         finally:
-            args.detect_threshold = saved_detect_threshold
+            args.muon_threshold = saved_muon_threshold
 
         run_records.append(run_record)
 

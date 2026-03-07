@@ -1,7 +1,6 @@
 // CLI:
 //   process <input.edm4hep.root> [--out out.root]
-//            [--sampling f] [--expected-pdg PDG]
-//            [--start-threshold GeV] [--debug]
+//            [--expected-pdg PDG] [--start-threshold GeV] [--debug]
 
 #include <array>
 #include <cmath>
@@ -61,7 +60,7 @@ int main(int argc, char** argv) {
   if (argc < 2 || hasArg(argc, argv, "--help")) {
     std::cout <<
       "Usage: process <input.edm4hep.root> [--out out.root]\n"
-      "                [--sampling f] [--expected-pdg PDG]\n"
+      "                [--expected-pdg PDG]\n"
       "                [--start-threshold GeV] [--debug]\n";
     return 0;
   }
@@ -70,7 +69,6 @@ int main(int argc, char** argv) {
   const std::string inFile   = argv[1];
   const std::string outFile  = getArg(argc, argv, "--out", "events.root");
   const int expectedPDG      = getArgI(argc, argv, "--expected-pdg", 0);
-  const double sampling_f    = getArgD(argc, argv, "--sampling", 0.03);
   const double start_threshold_GeV = getArgD(argc, argv, "--start-threshold", 1e-2);
 
   TFile* fout = TFile::Open(outFile.c_str(), "RECREATE");
@@ -80,14 +78,12 @@ int main(int argc, char** argv) {
   }
 
   float  t_mc_E=0;
-  float  t_sim_E=0;
-  float  t_rec_E=0;
+  float  t_visible_E=0;
   int    t_start_layer=-1;
 
   TTree* events = new TTree("events", "per-event dataset");
   events->Branch("mc_E",   &t_mc_E);
-  events->Branch("sim_E",  &t_sim_E);
-  events->Branch("rec_E", &t_rec_E);
+  events->Branch("visible_E",  &t_visible_E);
   events->Branch("start_layer", &t_start_layer);
   size_t nEvents=0, nWithMC=0, nWithSim=0;
 
@@ -193,7 +189,7 @@ int main(int argc, char** argv) {
       ++nWithMC;
     }
 
-    t_sim_E = 0.f;
+    t_visible_E = 0.f;
     t_start_layer = -1;
     std::array<double, kHcalLayerCount> layer_sim_energy_GeV {};
 
@@ -210,7 +206,7 @@ int main(int argc, char** argv) {
       }
       for (const auto& hit : *simCollection) {
         const double e = hit.getEnergy();
-        t_sim_E += (float)e;
+        t_visible_E += (float)e;
         // The readout encoding reserves bits 8..15 for the logical layer index.
         const int layer_index = decode_hcal_layer(static_cast<std::uint64_t>(hit.getCellID()));
         if (layer_index < 0 || layer_index >= kHcalLayerCount) {
@@ -228,9 +224,6 @@ int main(int argc, char** argv) {
         break;
       }
     }
-
-    // Convert the raw sim-energy sum into a simple reconstructed-energy estimate.
-    t_rec_E = (sampling_f > 0 ? t_sim_E / (float)sampling_f : 0.f);
 
     t_mc_E = (float)mcE;
     if (debug && nEvents==1) {

@@ -1,5 +1,5 @@
 /* Determine the metric threshold that matches a requested false-positive rate. */
-// root -l -b -q 'simulation/analysis/calibrate_fpr.C("path/to/event.root", "path/to/output.json", "rec_E", 0.01)'
+// root -l -b -q 'simulation/calibration/calibrate_fpr.C("path/to/event.root", "path/to/output.json", "visible_E", 0.01)'
 
 #include <TFile.h>
 #include <TTree.h>
@@ -85,7 +85,7 @@ void calibrate_fpr(const char* events_path_cstr,
   const double threshold = 0.5 * (values[static_cast<size_t>(lower_index)] + values[static_cast<size_t>(upper_index)]);
 
   nlohmann::json output;
-  output["threshold_GeV"] = threshold;
+  output["muon_threshold_GeV"] = threshold;
 
   // Flush the run-level record to performance.json beside events.root.
   std::ofstream out(out_json_path);

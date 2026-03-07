@@ -20,8 +20,9 @@ namespace {
 struct PerformanceStats {
   long long valid_event_count = 0;
   long long detected_event_count = 0;
-  double reconstructed_energy_sum_GeV = 0.0;
-  double reconstructed_energy_sum_sq_GeV = 0.0;
+  long long detected_energy_event_count = 0;
+  double detected_reconstructed_energy_sum_GeV = 0.0;
+  double detected_reconstructed_energy_sum_sq_GeV = 0.0;
   // Percent of neutron interactions that start in either of the 3 segments.
   long long start_in_seg1_count = 0;
   long long start_in_seg2_count = 0;
@@ -127,6 +128,7 @@ double median_layer_index(std::vector<int> start_layers) {
 
 void performance(const char* events_path_cstr,
                  const char* meta_path_cstr = "",
+                 const char* calibration_path_cstr = "",
                  const char* out_path_cstr = "") {
   if (!events_path_cstr || std::string(events_path_cstr).empty()) {
     std::cerr << "[performance] events.root path is required.\n";
@@ -138,6 +140,10 @@ void performance(const char* events_path_cstr,
       (meta_path_cstr && std::string(meta_path_cstr).size())
           ? std::string(meta_path_cstr)
           : sibling_path(events_path, "meta.json");
+  const std::string calibration_path =
+      (calibration_path_cstr && std::string(calibration_path_cstr).size())
+          ? std::string(calibration_path_cstr)
+          : sibling_path(events_path, "calibration.json");
   const std::string out_path =
       (out_path_cstr && std::string(out_path_cstr).size())
           ? std::string(out_path_cstr)
@@ -157,6 +163,20 @@ void performance(const char* events_path_cstr,
     return;
   }
 
+  std::ifstream calibration_input(calibration_path);
+  if (!calibration_input) {
+    std::cerr << "[performance] Failed to open calibration.json at " << calibration_path << ".\n";
+    return;
+  }
+
+  nlohmann::json calibration_json;
+  try {
+    calibration_input >> calibration_json;
+  } catch (const std::exception& error) {
+    std::cerr << "[performance] Failed to parse calibration.json: " << error.what() << ".\n";
+    return;
+  }
+
   if (!meta_json.contains("geometry_id") || !meta_json["geometry_id"].is_string()) {
     std::cerr << "[performance] meta.json is missing geometry_id.\n";
     return;
@@ -165,17 +185,30 @@ void performance(const char* events_path_cstr,
     std::cerr << "[performance] meta.json is missing gun_energy_GeV.\n";
     return;
   }
-  if (!meta_json.contains("detect_threshold_GeV") || !meta_json["detect_threshold_GeV"].is_number()) {
-    std::cerr << "[performance] meta.json is missing detect_threshold_GeV.\n";
+  if (!calibration_json.contains("muon_threshold_GeV") || !calibration_json["muon_threshold_GeV"].is_number()) {
+    std::cerr << "[performance] calibration.json is missing muon_threshold_GeV.\n";
+    return;
+  }
+  if (!calibration_json.contains("neutron_scale") || !calibration_json["neutron_scale"].is_number()) {
+    std::cerr << "[performance] calibration.json is missing neutron_scale.\n";
     return;
   }
 
   const std::string geometry_id = meta_json["geometry_id"].get<std::string>();
   const double gun_energy_GeV = meta_json["gun_energy_GeV"].get<double>();
-  const double detect_threshold_GeV = meta_json["detect_threshold_GeV"].get<double>();
+  const double muon_threshold_GeV = calibration_json["muon_threshold_GeV"].get<double>();
+  const double neutron_scale = calibration_json["neutron_scale"].get<double>();
   const double mc_rel_diff_limit = 0.1;
   const double wilson_z = 1.0;
   const std::string start_definition = "first_active_layer_above_threshold";
+  if (muon_threshold_GeV < 0.0 || !std::isfinite(muon_threshold_GeV)) {
+    std::cerr << "[performance] muon_threshold_GeV must be finite and non-negative.\n";
+    return;
+  }
+  if (!(neutron_scale > 0.0) || !std::isfinite(neutron_scale)) {
+    std::cerr << "[performance] neutron_scale must be finite and positive.\n";
+    return;
+  }
 
   SegmentBoundaries segment_boundaries;
   if (!load_segment_boundaries(geometry_id, segment_boundaries)) {
@@ -200,12 +233,8 @@ void performance(const char* events_path_cstr,
     std::cerr << "[performance] Branch mc_E is required in " << events_path << ".\n";
     return;
   }
-  if (tree->GetBranch("rec_E") == nullptr) {
-    std::cerr << "[performance] Branch rec_E is required in " << events_path << ".\n";
-    return;
-  }
-  if (tree->GetBranch("sim_E") == nullptr) {
-    std::cerr << "[performance] Branch sim_E is required in " << events_path << ".\n";
+  if (tree->GetBranch("visible_E") == nullptr) {
+    std::cerr << "[performance] Branch visible_E is required in " << events_path << ".\n";
     return;
   }
   if (tree->GetBranch("start_layer") == nullptr) {
@@ -214,14 +243,12 @@ void performance(const char* events_path_cstr,
   }
 
   float mc_E = 0.0F;
-  float rec_E = 0.0F;
-  float sim_E = 0.0F;
+  float visible_E = 0.0F;
   int start_layer = -1;
   std::string* category_ptr = nullptr;
 
   tree->SetBranchAddress("mc_E", &mc_E);
-  tree->SetBranchAddress("rec_E", &rec_E);
-  tree->SetBranchAddress("sim_E", &sim_E);
+  tree->SetBranchAddress("visible_E", &visible_E);
   tree->SetBranchAddress("start_layer", &start_layer);
   if (tree->GetBranch("category") != nullptr) {
     tree->SetBranchAddress("category", &category_ptr);
@@ -249,10 +276,13 @@ void performance(const char* events_path_cstr,
     }
 
     stats.valid_event_count++;
-    stats.reconstructed_energy_sum_GeV += static_cast<double>(rec_E);
-    stats.reconstructed_energy_sum_sq_GeV += static_cast<double>(rec_E) * static_cast<double>(rec_E);
-    if (static_cast<double>(sim_E) >= detect_threshold_GeV) {
+    if (static_cast<double>(visible_E) >= muon_threshold_GeV) {
+      const double reconstructed_energy_GeV = static_cast<double>(visible_E) / neutron_scale;
       stats.detected_event_count++;
+      stats.detected_energy_event_count++;
+      stats.detected_reconstructed_energy_sum_GeV += reconstructed_energy_GeV;
+      stats.detected_reconstructed_energy_sum_sq_GeV +=
+          reconstructed_energy_GeV * reconstructed_energy_GeV;
     }
 
     if (start_layer >= 0) {
@@ -279,6 +309,8 @@ void performance(const char* events_path_cstr,
   nlohmann::json output;
   output["geometry_id"] = geometry_id;
   output["gun_energy_GeV"] = gun_energy_GeV;
+  output["valid_event_count"] = stats.valid_event_count;
+  output["detected_event_count"] = stats.detected_event_count;
 
   const BinomialInterval efficiency_interval =
       wilson_interval(stats.detected_event_count, stats.valid_event_count, wilson_z);
@@ -292,13 +324,15 @@ void performance(const char* events_path_cstr,
     output["eff_hi"] = nullptr;
   }
 
-  if (stats.valid_event_count > 1 && gun_energy_GeV > 0.0) {
+  if (stats.detected_energy_event_count > 1 && gun_energy_GeV > 0.0) {
     const double mean_reconstructed_energy_GeV =
-        stats.reconstructed_energy_sum_GeV / static_cast<double>(stats.valid_event_count);
+        stats.detected_reconstructed_energy_sum_GeV /
+        static_cast<double>(stats.detected_energy_event_count);
     double variance =
-        (stats.reconstructed_energy_sum_sq_GeV -
-         static_cast<double>(stats.valid_event_count) * mean_reconstructed_energy_GeV * mean_reconstructed_energy_GeV) /
-        static_cast<double>(stats.valid_event_count - 1);
+        (stats.detected_reconstructed_energy_sum_sq_GeV -
+         static_cast<double>(stats.detected_energy_event_count) *
+             mean_reconstructed_energy_GeV * mean_reconstructed_energy_GeV) /
+        static_cast<double>(stats.detected_energy_event_count - 1);
     if (variance < 0.0) {
       variance = 0.0;
     }

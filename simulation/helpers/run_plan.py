@@ -53,6 +53,7 @@ class RunPlan:
     raw_path: Path
     events_path: Path
     meta_path: Path
+    calibration_path: Path
     performance_path: Path
     expected_pdg: Optional[int]
 
@@ -133,6 +134,7 @@ def build_run_plans(
                         raw_path=raw_output_directory / f"{run_id}.edm4hep.root",
                         events_path=processed_output_directory / "events.root",
                         meta_path=processed_output_directory / "meta.json",
+                        calibration_path=processed_output_directory / "calibration.json",
                         performance_path=processed_output_directory / "performance.json",
                         expected_pdg=expected_pdg,
                     )

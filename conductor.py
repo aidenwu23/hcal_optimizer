@@ -12,15 +12,12 @@ python3 conductor.py \
     --process-bin ./build/bin/process \
     --ddsim ddsim \
     --root-bin root \
-    --events-per-run 100 \
+    --events-per-run 1000 \
     --gun-particle neutron \
     --gun-energy 5 \
     --start-alpha 0.2 \
-    --seed 67 \
+    --seeds 67 \
     --overwrite
-
-start-alpha = coefficient of the threshold energy used to determine the start of a nuclear interaction, 
-default 0.2 * muon calibration threshold.
 """
 
 from __future__ import annotations
@@ -77,6 +74,8 @@ def parse_args() -> argparse.Namespace:
         help="Override the expected MC PDG code; defaults to gun particle lookup when available.",
     )
     parser.add_argument("--detect-threshold", type=float, default=0.05, help="Detection threshold (GeV) recorded in meta.json.")
+    # 0.2 x muon_99th_percentile is about 2 x (event_threshold / N_layers) for this 10-layer HCAL,
+    # which makes it a rough 2 x per-layer MIP threshold for the shower-start proxy.
     parser.add_argument(
         "--start-alpha",
         type=float,

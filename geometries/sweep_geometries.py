@@ -49,9 +49,6 @@ def load_yaml_object(yaml_path: Path) -> dict:
         return {}
     if not isinstance(loaded_object, dict):
         raise ValueError(f"Sweep YAML must contain an object at top level: {yaml_path}")
-    for unsupported_key in ("outdir_xml", "outdir_params"):
-        if unsupported_key in loaded_object:
-            raise ValueError(f"Unsupported sweep key: {unsupported_key}")
     return loaded_object
 
 

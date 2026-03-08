@@ -10,19 +10,6 @@ from typing import Dict, Optional
 PROJECT_DIRECTORY = Path(__file__).resolve().parents[1]
 DEFAULT_TEMPLATE_PATH = "geometries/templates/hcal_template.xml"
 
-# These are flat, single-value parameter names that the generator does not support.
-# The per-segment variants (t_absorber_seg1/2/3, t_scin_seg1/2/3, etc.) are required instead
-# so that each longitudinal segment can have independent layer thicknesses.
-INVALID_PARAMETER_KEYS = {
-    "t_absorber",
-    "t_scin",
-    "t_tape",
-    "tapeMaterial",
-    "t_spacer_seg1",
-    "t_spacer_seg2",
-    "t_spacer_seg3",
-}
-
 
 def resolve_project_path(path_text: str) -> Path:
     raw_path = Path(path_text).expanduser()
@@ -90,16 +77,6 @@ def parse_int_value(value_text: str, key_text: str) -> int:
 
 
 def validate_parameter_contract(parameter_values: Dict[str, str]) -> None:
-    # Reject any parameter names that belong to the unsupported flat format.
-    invalid_keys = sorted(key_text for key_text in parameter_values if key_text in INVALID_PARAMETER_KEYS)
-    if invalid_keys:
-        joined_keys = ", ".join(invalid_keys)
-        raise ValueError(
-            "Invalid HCAL parameters: "
-            f"{joined_keys}. Use t_spacer, spacerMaterial, "
-            "t_absorber_seg1/2/3, and t_scin_seg1/2/3."
-        )
-
     # Confirm that every physical parameter the generator needs is present and non-empty.
     required_keys = [
         "seg1_layers",

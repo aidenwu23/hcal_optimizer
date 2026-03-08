@@ -8,10 +8,6 @@ import shutil
 from pathlib import Path
 from typing import List
 
-# Preserve Git sentinels and any file starting with ".git"
-GIT_SENTINELS = {".gitkeep", ".gitignore", ".gitattributes"}
-
-
 def remove_path(path: Path, dry_run: bool) -> None:
     """Delete a file or directory tree, respecting dry-run."""
     if dry_run:
@@ -31,7 +27,7 @@ def clear_directory(root: Path, *, dry_run: bool) -> None:
         return
     for child in root.iterdir():
         name = child.name
-        if name in GIT_SENTINELS or name.startswith(".git"):
+        if name.startswith(".git"):
             continue
         remove_path(child, dry_run=dry_run)
 

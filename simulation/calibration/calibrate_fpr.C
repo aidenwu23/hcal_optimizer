@@ -11,28 +11,27 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
-#include <map>
 #include <string>
 #include <vector>
-#include <limits>
 
-void calibrate_fpr(const char* events_path_cstr, 
-                   const char* out_json_cstr, 
-                   const char* metric_expr_cstr, 
+void calibrate_fpr(const char* events_path_cstr,
+                   const char* out_json_cstr,
+                   const char* metric_expr_cstr,
                    double target_fpr) {
-  if (!events_path_cstr || std::string(events_path_cstr).empty()){
+  // Validate the required runtime inputs first.
+  if (!events_path_cstr || std::string(events_path_cstr).empty()) {
     std::cerr << "[calibrate_fpr] events.root path is required.\n";
     return;
   }
-  if (!out_json_cstr || std::string(out_json_cstr).empty()){
+  if (!out_json_cstr || std::string(out_json_cstr).empty()) {
     std::cerr << "[calibrate_fpr] Out json path is required.\n";
     return;
   }
-  if (!metric_expr_cstr || std::string(metric_expr_cstr).empty()){
+  if (!metric_expr_cstr || std::string(metric_expr_cstr).empty()) {
     std::cerr << "[calibrate_fpr] Metric expression is required.\n";
     return;
   }
-  if (target_fpr <= 0.0 || target_fpr >= 1.0){
+  if (target_fpr <= 0.0 || target_fpr >= 1.0) {
     std::cerr << "[calibrate_fpr] Target false positive rate should be between 0 and 1.\n";
     return;
   }
@@ -63,31 +62,36 @@ void calibrate_fpr(const char* events_path_cstr,
   std::vector<double> values;
   values.reserve(static_cast<size_t>(tree->GetEntries()));
 
-  const Long64_t n_entries = tree -> GetEntries();
+  const Long64_t n_entries = tree->GetEntries();
+  // Evaluate the requested metric for every valid event.
   for (Long64_t i = 0; i < n_entries; ++i) {
     tree->GetEntry(i);
     const double x = formula.EvalInstance();
-    if(!std::isfinite(x)){
+    if (!std::isfinite(x)) {
       continue;
     }
     values.push_back(x);
   }
 
   const Long64_t n_values = static_cast<Long64_t>(values.size());
-  if (n_values == 0){
+  if (n_values == 0) {
     std::cerr << "[calibrate_fpr] No valid metric values found in the data" << "\n";
     return;
   }
+
+  // Convert the requested false-positive rate into the matching metric threshold.
   std::sort(values.begin(), values.end());
-  const Long64_t cutoff_index = static_cast<Long64_t>(std::floor((1.0 - target_fpr) * static_cast<double>(n_values - 1)));
+  const Long64_t cutoff_index = static_cast<Long64_t>(
+      std::floor((1.0 - target_fpr) * static_cast<double>(n_values - 1)));
   const Long64_t lower_index = std::max<Long64_t>(0, std::min(n_values - 1, cutoff_index));
   const Long64_t upper_index = std::min(n_values - 1, lower_index + 1);
-  const double threshold = 0.5 * (values[static_cast<size_t>(lower_index)] + values[static_cast<size_t>(upper_index)]);
+  const double threshold =
+      0.5 * (values[static_cast<size_t>(lower_index)] + values[static_cast<size_t>(upper_index)]);
 
   nlohmann::json output;
   output["muon_threshold_GeV"] = threshold;
 
-  // Flush the run-level record to performance.json beside events.root.
+  // Write the calibrated threshold to the requested JSON path.
   std::ofstream out(out_json_path);
   if (!out) {
     std::cerr << "[calibrate_fpr] Failed to open " << out_json_path

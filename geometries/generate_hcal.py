@@ -10,7 +10,6 @@ import re
 import xml.etree.ElementTree as xml_tree
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Tuple
 
 from geometry_utils import (
     find_target_detector,
@@ -48,7 +47,8 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def parse_set_assignment(assignment_text: str) -> Tuple[str, str]:
+def parse_set_assignment(assignment_text: str) -> tuple[str, str]:
+    # Split one --set key=value assignment into its two parts.
     if "=" not in assignment_text:
         raise ValueError(f"Invalid --set value: {assignment_text}")
     key_text, value_text = assignment_text.split("=", 1)
@@ -60,6 +60,7 @@ def parse_set_assignment(assignment_text: str) -> Tuple[str, str]:
 
 
 def set_detector_parameter(detector_element: xml_tree.Element, key_text: str, value_text: str) -> None:
+    # Update an existing parameter or append a new one when it is missing.
     for parameter_element in detector_element.findall("parameter"):
         if parameter_element.get("name") == key_text:
             parameter_element.set("value", value_text)
@@ -69,16 +70,13 @@ def set_detector_parameter(detector_element: xml_tree.Element, key_text: str, va
     new_parameter.set("value", value_text)
 
 
-# Hash the full sorted parameter set so any change in physical values produces a different ID.
-# The ID also names the output directory, which means two geometries with the same parameters
-# map to the same directory and will not be regenerated unnecessarily.
-def compute_geometry_id(parameter_values: Dict[str, str]) -> str:
+# Hash the sorted parameter set to get a deterministic geometry ID.
+def compute_geometry_id(parameter_values: dict[str, str]) -> str:
     digest_input = json.dumps(parameter_values, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha1(digest_input).hexdigest()[:8]
 
 
-# Store bare numbers as int or float rather than strings so downstream tools can do
-# arithmetic on them directly without parsing. Non-numeric values are left as strings.
+# Convert bare numeric strings into JSON numbers.
 def convert_json_value(value_text: str) -> object:
     value_text = value_text.strip()
     if NUMERIC_PATTERN.match(value_text):
@@ -89,8 +87,7 @@ def convert_json_value(value_text: str) -> object:
     return value_text
 
 
-# Keep the generated HCAL segment thicknesses explicit in centimeters so later tools do not
-# have to guess whether a bare number was meant to be mm or cm.
+# Keep segment thickness overrides explicit in centimeters.
 def normalize_hcal_parameter_value(key_text: str, value_text: str) -> str:
     stripped_value = value_text.strip()
     if key_text in SEGMENT_LENGTH_KEYS and NUMERIC_PATTERN.match(stripped_value):
@@ -98,14 +95,16 @@ def normalize_hcal_parameter_value(key_text: str, value_text: str) -> str:
     return stripped_value
 
 
-def create_json_payload(parameter_values: Dict[str, str], geometry_id: str) -> Dict[str, object]:
-    payload: Dict[str, object] = {"geometry_id": geometry_id}
+def create_json_payload(parameter_values: dict[str, str], geometry_id: str) -> dict[str, object]:
+    # Build the JSON parameter payload that accompanies the generated XML.
+    payload: dict[str, object] = {"geometry_id": geometry_id}
     for key_text, value_text in sorted(parameter_values.items()):
         payload[key_text] = convert_json_value(normalize_hcal_parameter_value(key_text, value_text))
     return payload
 
 
-def choose_output_paths(arguments: argparse.Namespace, geometry_id: str) -> Tuple[Path, Path]:
+def choose_output_paths(arguments: argparse.Namespace, geometry_id: str) -> tuple[Path, Path]:
+    # Resolve the XML and JSON output paths for this geometry.
     if arguments.out:
         output_xml_path = resolve_project_path(arguments.out)
         geometry_directory = output_xml_path.parent
@@ -126,14 +125,17 @@ def choose_output_paths(arguments: argparse.Namespace, geometry_id: str) -> Tupl
 
 
 def indent_xml(element: xml_tree.Element, level: int = 0) -> None:
+    # Apply the repo XML indentation style recursively.
     indentation = "\n" + level * "  "
     if len(element):
         if not element.text or not element.text.strip():
             element.text = indentation + "  "
-        for child_element in list(element):
+        child_elements = list(element)
+        for child_element in child_elements:
             indent_xml(child_element, level + 1)
-        if not child_element.tail or not child_element.tail.strip():
-            child_element.tail = indentation
+        last_child = child_elements[-1]
+        if not last_child.tail or not last_child.tail.strip():
+            last_child.tail = indentation
     if level and (not element.tail or not element.tail.strip()):
         element.tail = indentation
 
@@ -141,7 +143,7 @@ def indent_xml(element: xml_tree.Element, level: int = 0) -> None:
 def main() -> None:
     arguments = parse_arguments()
 
-    # Load the template XML and locate the detector element we are going to modify.
+    # Load the template XML and select the detector element to edit.
     template_path = resolve_project_path(arguments.template)
     if not template_path.exists():
         raise SystemExit(f"Template XML not found: {template_path}")
@@ -150,23 +152,23 @@ def main() -> None:
     root_element = xml_document.getroot()
     detector_element = find_target_detector(root_element, arguments.detector_name, arguments.detector_type)
 
-    # Start from the parameter values already in the template, then let CLI --set flags override them.
-    # Reserved keys like geometry_id are skipped so callers cannot inject a fake ID.
+    # Start from the template parameters, then apply CLI overrides.
     parameter_values = read_detector_parameters(detector_element)
 
+    # Skip reserved keys so callers cannot inject a fake geometry ID.
     for assignment_text in arguments.set:
         key_text, value_text = parse_set_assignment(assignment_text)
         if key_text in RESERVED_PARAMETER_KEYS:
             continue
         parameter_values[key_text] = value_text
 
-    # Validate the merged parameter set and compute a deterministic ID from it.
+    # Validate the merged parameters, then choose the output locations.
     parameter_values.setdefault("side", "-z")
     validate_parameter_contract(parameter_values)
     geometry_id = compute_geometry_id(parameter_values)
     output_xml_path, output_parameter_path = choose_output_paths(arguments, geometry_id)
 
-    # Write the resolved parameter values back into the XML so the compact file is self-contained.
+    # Write the resolved parameter values back into the XML.
     for key_text, value_text in sorted(parameter_values.items()):
         set_detector_parameter(
             detector_element,
@@ -174,12 +176,12 @@ def main() -> None:
             normalize_hcal_parameter_value(key_text, value_text),
         )
 
-    # Build the JSON payload and prepare the output directories before touching any files.
+    # Build the JSON payload and create the output directories.
     output_parameter_payload = create_json_payload(parameter_values, geometry_id)
     output_xml_path.parent.mkdir(parents=True, exist_ok=True)
     output_parameter_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Build a human-readable provenance block and embed it as a comment at the top of the XML.
+    # Build the provenance comment block that is embedded in the XML.
     tag_text = arguments.tag or geometry_id
     parameter_source_text = to_project_relative_text(output_parameter_path)
 
@@ -197,14 +199,14 @@ def main() -> None:
     )
     root_element.insert(0, xml_tree.Comment("\n" + "\n".join(comment_lines) + "\n"))
 
+    # Print the resolved outputs without writing files during dry runs.
     if arguments.dry_run:
         print("\n".join(comment_lines))
         print(f"OutputXML: {to_project_relative_text(output_xml_path)}")
         print(f"OutputJSON: {to_project_relative_text(output_parameter_path)}")
         return
 
-    # Write both outputs: the JSON parameter record that other scripts read, and the compact XML
-    # that ddsim loads directly to build the detector geometry.
+    # Write both generated outputs to disk.
     indent_xml(root_element)
     with output_parameter_path.open("w", encoding="utf-8") as output_json_file:
         json.dump(output_parameter_payload, output_json_file, indent=2)

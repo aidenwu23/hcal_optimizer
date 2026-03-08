@@ -1,22 +1,8 @@
 #!/usr/bin/env python3
 """conductor.py
 
-Backbone orchestration script for the backward HCAL neutron campaign.
-It stitches together geometry sweeps, ddsim production, processing,
-metadata writing, performance analysis, and run manifests.
-
-Example CLI
------------
-python3 conductor.py \
-    --spec geometries/sweeps/test_run.yaml \
-    --process-bin ./build/bin/process \
-    --ddsim ddsim \
-    --root-bin root \
-    --events-per-run 2000 \
-    --gun-particle neutron \
-    --gun-energy 5 \
-    --seeds 67 \
-    --overwrite
+Run the HCAL production campaign from geometry sweeps through manifests.
+Example: python3 conductor.py --spec geometries/sweeps/test_run.yaml --overwrite
 """
 
 from __future__ import annotations
@@ -47,7 +33,7 @@ from simulation.helpers.run_steps import (
 PROJECT_DIRECTORY = Path(__file__).resolve().parent
 
 
-# Collect the runtime switches that define one orchestration pass over the geometry set.
+# Parse the CLI options for one campaign run.
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Orchestrate neutron HCAL production runs.")
     parser.add_argument("--spec", "-s", nargs="+", required=True, help="Sweep spec(s) to materialise (YAML).")
@@ -84,8 +70,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-# Resolve CLI paths relative to the project root so conductor.py behaves the same whether it
-# is launched from the repo root or from somewhere else.
+# Resolve a CLI path against the project root.
 def resolve_runtime_path(path_text: str) -> Path:
     raw_path = Path(path_text).expanduser()
     if raw_path.is_absolute():
@@ -93,26 +78,25 @@ def resolve_runtime_path(path_text: str) -> Path:
     return (PROJECT_DIRECTORY / raw_path).resolve()
 
 
-# Normalize every requested sweep spec into an absolute path before the geometry pipeline runs.
+# Resolve each requested sweep spec path.
 def resolve_spec_paths(spec_texts: List[str]) -> List[Path]:
     return [resolve_runtime_path(spec_text) for spec_text in spec_texts]
 
 
-# Run one full campaign pass: materialize geometries, build run plans, execute each run,
-# then write the manifest that records what completed, skipped, or failed.
+# Run one full campaign and write the final manifests.
 def main() -> None:
     args = parse_args()
 
-    # Resolve the runtime file locations once so the helper calls below all see stable paths.
+    # Resolve output paths.
     args.process_bin = str(resolve_runtime_path(args.process_bin))
     args.manifest_json = str(resolve_runtime_path(args.manifest_json))
     args.manifest_csv = str(resolve_runtime_path(args.manifest_csv))
 
-    # Turn the requested sweep specs into generated geometries before any run planning starts.
+    # Materialize the requested sweep specs before building run plans.
     spec_paths = resolve_spec_paths(args.spec)
     maybe_run_sweeps(args, spec_paths)
 
-    # Build the in-memory geometry list that every downstream run will reference.
+    # Load the geometry variants.
     geometry_rows = inspect_geometry_rows(args.python, spec_paths)
     require_geometry_files = args.skip_sweep or not args.dry_run
     geometry_variants = load_geometry_variants(
@@ -123,16 +107,15 @@ def main() -> None:
         print("No geometry variants found; nothing to do.")
         return
 
-    # Prepare any optional processor flags that should be threaded through every run.
+    # Flatten any extra processor flags once before planning runs.
     extra_process_flags = flatten_process_extras(args.process_extra)
 
-    # For non-muon runs, collect a per-geometry muon calibration threshold before any signal
-    # events are processed. The threshold is used downstream to separate real hadronic deposits
-    # from noise, so it must be ready before the first neutron run starts.
+    # Load one muon threshold per geometry before non-muon signal runs.
     muon_threshold_by_geometry_id: Dict[str, float] = {}
     gun_particle = args.gun_particle.strip().lower()
     running_muon_sample = gun_particle in ("mu-", "mu+")
     if not running_muon_sample:
+        # Reuse the configured default during dry runs.
         for geometry_variant in geometry_variants:
             calibration_json_path = run_muon_calibration(args, geometry_variant)
             if args.dry_run:
@@ -145,43 +128,38 @@ def main() -> None:
                 raise ValueError(f"muon_threshold_GeV missing in {calibration_json_path}")
             muon_threshold_by_geometry_id[geometry_variant.geometry_id] = float(threshold_value)
 
-    # Expand the geometry set, energies, and seeds into the concrete list of ddsim runs.
+    # Expand the geometry variants into run plans.
     run_plans = build_run_plans(args, geometry_variants, extra_process_flags)
     if not run_plans:
         print("No run plans generated; adjust seeds/energies.")
         return
 
-    # Execute each planned run in order and keep a record of timing, status, and failures
-    # so the manifest at the end reflects the full campaign history.
+    # Run each plan and record its final status for the manifest.
     run_records: List[RunRecord] = []
     for run_plan in run_plans:
         run_record = RunRecord(plan=run_plan, status="pending")
 
-        # Reuse existing event files unless the user explicitly asked to overwrite them.
+        # Skip runs whose event file already exists unless overwrite was requested.
         if not args.overwrite and run_plan.events_path.exists():
             run_record.status = "skipped_existing"
             run_records.append(run_record)
             print(f"[skip] {run_plan.run_id} (events already present)")
             continue
 
-        # Save the default muon threshold so it can be restored after this run, regardless of
-        # whether the per-geometry calibration overrides it or the run fails partway through.
         saved_muon_threshold = args.muon_threshold
 
         try:
             neutron_scale = None
             is_neutron = run_plan.gun_particle.strip().lower() == "neutron"
 
-            # Replace the default threshold with the value derived from the muon control sample
-            # for this specific geometry, so the detection cut reflects its actual noise floor.
+            # Apply the per-geometry threshold before running non-muon samples.
             if not running_muon_sample:
                 geometry_id = run_plan.geometry_variant.geometry_id
                 if geometry_id not in muon_threshold_by_geometry_id:
                     raise RuntimeError(f"Missing muon calibration threshold for geometry {geometry_id}")
                 args.muon_threshold = muon_threshold_by_geometry_id[geometry_id]
 
-            # Run the detector simulation first, then process the output, then attach any
-            # calibration and performance products that belong to this sample type.
+            # Run simulation, processing, and any sample-specific analysis products.
             run_record.ddsim_seconds = run_ddsim(args, run_plan)
             run_record.process_seconds, _ = run_process(
                 args,
@@ -196,19 +174,18 @@ def main() -> None:
                 run_record.performance_seconds = run_performance_analysis(args, run_plan)
             run_record.status = "completed"
         except subprocess.CalledProcessError as exc:
-            # Keep the shell command and exit code so failed external steps are visible in the manifest.
             run_record.status = "failed"
             run_record.error = f"{exc.cmd} -> exit {exc.returncode}"
         except Exception as exc:
             run_record.status = "failed"
             run_record.error = str(exc)
         finally:
-            # Restore the caller-level muon threshold before moving to the next planned run.
+            # Restore the caller-level threshold before the next run starts.
             args.muon_threshold = saved_muon_threshold
 
         run_records.append(run_record)
 
-    # Write the run manifest after every planned run has either completed, failed, or been skipped.
+    # Write the final manifest after all planned runs finish.
     write_run_manifests(run_records, Path(args.manifest_json), Path(args.manifest_csv))
     completed = sum(1 for run_record in run_records if run_record.status == "completed")
     skipped = sum(1 for run_record in run_records if run_record.status.startswith("skipped"))

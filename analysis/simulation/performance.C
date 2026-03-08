@@ -17,7 +17,6 @@ namespace {
 struct PerformanceStats {
   long long valid_event_count = 0;
   long long detected_event_count = 0;
-  long long detected_energy_event_count = 0;
   double detected_reconstructed_energy_sum_GeV = 0.0;
   double detected_reconstructed_energy_sum_sq_GeV = 0.0;
 };
@@ -34,6 +33,34 @@ std::string sibling_path(const std::string& path, const std::string& basename) {
     return basename;
   }
   return path.substr(0, separator_index + 1) + basename;
+}
+
+std::string string_arg_or_default(const char* value, const std::string& fallback) {
+  if (value && std::string(value).size()) {
+    return std::string(value);
+  }
+  return fallback;
+}
+
+bool load_json_file(const std::string& path,
+                    const char* label,
+                    nlohmann::json& json_payload,
+                    const char* context_label) {
+  std::ifstream input(path);
+  if (!input) {
+    std::cerr << "[" << context_label << "] Failed to open " << label << " at " << path << ".\n";
+    return false;
+  }
+
+  try {
+    input >> json_payload;
+  } catch (const std::exception& error) {
+    std::cerr << "[" << context_label << "] Failed to parse " << label << ": "
+              << error.what() << ".\n";
+    return false;
+  }
+
+  return true;
 }
 
 BinomialInterval wilson_interval(long long successes, long long trials, double z_value) {
@@ -62,53 +89,35 @@ void performance(const char* events_path_cstr,
                  const char* meta_path_cstr = "",
                  const char* calibration_path_cstr = "",
                  const char* out_path_cstr = "") {
+  // Validate the main runtime input first.
   if (!events_path_cstr || std::string(events_path_cstr).empty()) {
     std::cerr << "[performance] events.root path is required.\n";
     return;
   }
 
   const std::string events_path(events_path_cstr);
-  const std::string meta_path =
-      (meta_path_cstr && std::string(meta_path_cstr).size())
-          ? std::string(meta_path_cstr)
-          : sibling_path(events_path, "meta.json");
+  const std::string meta_path = string_arg_or_default(meta_path_cstr, sibling_path(events_path, "meta.json"));
   const std::string calibration_path =
-      (calibration_path_cstr && std::string(calibration_path_cstr).size())
-          ? std::string(calibration_path_cstr)
-          : sibling_path(events_path, "calibration.json");
+      string_arg_or_default(calibration_path_cstr, sibling_path(events_path, "calibration.json"));
   const std::string out_path =
-      (out_path_cstr && std::string(out_path_cstr).size())
-          ? std::string(out_path_cstr)
-          : sibling_path(events_path, "performance.json");
-
-  std::ifstream meta_input(meta_path);
-  if (!meta_input) {
-    std::cerr << "[performance] Failed to open meta.json at " << meta_path << ".\n";
-    return;
-  }
+      string_arg_or_default(out_path_cstr, sibling_path(events_path, "performance.json"));
 
   nlohmann::json meta_json;
-  try {
-    meta_input >> meta_json;
-  } catch (const std::exception& error) {
-    std::cerr << "[performance] Failed to parse meta.json: " << error.what() << ".\n";
+  if (!load_json_file(meta_path, "meta.json", meta_json, "performance")) {
     return;
   }
 
-  std::ifstream calibration_input(calibration_path);
-  if (!calibration_input) {
-    std::cerr << "[performance] Failed to open calibration.json at " << calibration_path << ".\n";
-    return;
-  }
-
+  // Load the metadata and calibration needed for the event selection.
   nlohmann::json calibration_json;
-  try {
-    calibration_input >> calibration_json;
-  } catch (const std::exception& error) {
-    std::cerr << "[performance] Failed to parse calibration.json: " << error.what() << ".\n";
+  if (!load_json_file(
+          calibration_path,
+          "calibration.json",
+          calibration_json,
+          "performance")) {
     return;
   }
 
+  // Validate the fields needed for efficiency and energy-resolution calculation.
   if (!meta_json.contains("geometry_id") || !meta_json["geometry_id"].is_string()) {
     std::cerr << "[performance] meta.json is missing geometry_id.\n";
     return;
@@ -130,8 +139,8 @@ void performance(const char* events_path_cstr,
   const double gun_energy_GeV = meta_json["gun_energy_GeV"].get<double>();
   const double muon_threshold_GeV = calibration_json["muon_threshold_GeV"].get<double>();
   const double neutron_scale = calibration_json["neutron_scale"].get<double>();
-  const double mc_rel_diff_limit = 0.1;
-  const double wilson_z = 1.0;
+  const double mc_rel_diff_limit = 0.1;  // Keep the 10% MC-energy consistency window.
+  const double wilson_z = 1.0;  // Use a 1-sigma Wilson interval for the efficiency error.
   if (muon_threshold_GeV < 0.0 || !std::isfinite(muon_threshold_GeV)) {
     std::cerr << "[performance] muon_threshold_GeV must be finite and non-negative.\n";
     return;
@@ -141,6 +150,7 @@ void performance(const char* events_path_cstr,
     return;
   }
 
+  // Open the processed event tree and bind the required branches.
   TFile input_file(events_path.c_str(), "READ");
   if (input_file.IsZombie()) {
     std::cerr << "[performance] Failed to open " << events_path << ".\n";
@@ -174,6 +184,7 @@ void performance(const char* events_path_cstr,
 
   PerformanceStats stats;
   const Long64_t entry_count = tree->GetEntries();
+  // Keep only the selected beam sample, then accumulate detection and energy statistics.
   for (Long64_t entry_index = 0; entry_index < entry_count; ++entry_index) {
     tree->GetEntry(entry_index);
 
@@ -197,13 +208,13 @@ void performance(const char* events_path_cstr,
     if (static_cast<double>(visible_E) >= muon_threshold_GeV) {
       const double reconstructed_energy_GeV = static_cast<double>(visible_E) / neutron_scale;
       stats.detected_event_count++;
-      stats.detected_energy_event_count++;
       stats.detected_reconstructed_energy_sum_GeV += reconstructed_energy_GeV;
       stats.detected_reconstructed_energy_sum_sq_GeV +=
           reconstructed_energy_GeV * reconstructed_energy_GeV;
     }
   }
 
+  // Convert the accumulated counters into the JSON summary payload.
   nlohmann::json output;
   output["geometry_id"] = geometry_id;
   output["gun_energy_GeV"] = gun_energy_GeV;
@@ -222,15 +233,15 @@ void performance(const char* events_path_cstr,
     output["eff_hi"] = nullptr;
   }
 
-  if (stats.detected_energy_event_count > 1 && gun_energy_GeV > 0.0) {
+  if (stats.detected_event_count > 1 && gun_energy_GeV > 0.0) {
     const double mean_reconstructed_energy_GeV =
         stats.detected_reconstructed_energy_sum_GeV /
-        static_cast<double>(stats.detected_energy_event_count);
+        static_cast<double>(stats.detected_event_count);
     double variance =
         (stats.detected_reconstructed_energy_sum_sq_GeV -
-         static_cast<double>(stats.detected_energy_event_count) *
+         static_cast<double>(stats.detected_event_count) *
              mean_reconstructed_energy_GeV * mean_reconstructed_energy_GeV) /
-        static_cast<double>(stats.detected_energy_event_count - 1);
+        static_cast<double>(stats.detected_event_count - 1);
     if (variance < 0.0) {
       variance = 0.0;
     }
@@ -239,6 +250,7 @@ void performance(const char* events_path_cstr,
     output["energy_resolution"] = nullptr;
   }
 
+  // Write the final performance summary next to the run outputs.
   std::ofstream output_file(out_path);
   if (!output_file) {
     std::cerr << "[performance] Failed to open " << out_path << " for writing.\n";

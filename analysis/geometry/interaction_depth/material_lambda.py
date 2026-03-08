@@ -8,7 +8,6 @@ import ast
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Set
 import xml.etree.ElementTree as xml_tree
 
 PROJECT_DIRECTORY = Path(__file__).resolve().parents[3]
@@ -26,8 +25,7 @@ DENSITY_TO_G_CM3 = {
     "mg/cm3": 0.001,
 }
 
-# One material component from the XML graph. This can be either a mass fraction or a
-# stoichiometric count, depending on how the material was written in the XML.
+# One material component from the XML graph.
 @dataclass
 class MaterialPiece:
     name: str
@@ -35,24 +33,22 @@ class MaterialPiece:
     amount_kind: str
 
 
-# One node in the material graph after the XML files are loaded. Primitive elements can
-# carry tabulated lambda_I directly, while mixtures and compounds carry component pieces.
+# One loaded material entry with optional composition pieces.
 @dataclass
 class MaterialEntry:
     name: str
     density_g_cm3: float | None = None
     lambda_I_mm: float | None = None
     atomic_mass_g_mol: float | None = None
-    pieces: List[MaterialPiece] = field(default_factory=list)
+    pieces: list[MaterialPiece] = field(default_factory=list)
     lambda_I_resolved_mm: float | None = None
     mass_resolved_g_mol: float | None = None
 
 
-# Keep the loaded material graph in one container so it can be passed around the analysis
-# without re-reading the XML files.
+# One container for the loaded material graph.
 @dataclass
 class MaterialLibrary:
-    entries_by_name: Dict[str, MaterialEntry]
+    entries_by_name: dict[str, MaterialEntry]
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -68,16 +64,15 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-# Read one of the XML material definition files into memory before walking its material tree.
 def _read_xml_root(xml_path: Path) -> xml_tree.Element:
+    """Read one XML material definition file."""
     if not xml_path.exists():
         raise FileNotFoundError(f"Material definition file not found: {xml_path}")
     return xml_tree.parse(xml_path).getroot()
 
 
-# The XML files use short arithmetic expressions in some composition fields, so evaluate
-# those expressions with a tightly restricted parser before using them as physical weights.
 def _eval_expression_node(node: ast.AST) -> float:
+    """Evaluate one restricted numeric AST node."""
     if isinstance(node, ast.Expression):
         return _eval_expression_node(node.body)
     if isinstance(node, ast.Constant):
@@ -109,8 +104,6 @@ def _eval_number_expression(number_text: str) -> float:
     return float(_eval_expression_node(parsed_expression))
 
 
-# Read the tabulated density when it is present. The interaction-length mixture rule uses
-# mass fractions, but keeping the density is still useful context for later checks.
 def _read_density_g_cm3(material_element: xml_tree.Element) -> float | None:
     """Read the material density in g/cm3 when it is present."""
     density_element = material_element.find("D")
@@ -125,8 +118,6 @@ def _read_density_g_cm3(material_element: xml_tree.Element) -> float | None:
     return _eval_number_expression(value_text) * DENSITY_TO_G_CM3[unit_text]
 
 
-# Primitive entries in elements.xml already carry a nuclear interaction length. Those
-# tabulated values are the anchors for every recursive mixture calculation downstream.
 def _read_lambda_I_mm(material_element: xml_tree.Element) -> float | None:
     """Read the direct nuclear interaction length in mm when it is tabulated."""
     nil_element = material_element.find("NIL")
@@ -141,8 +132,6 @@ def _read_lambda_I_mm(material_element: xml_tree.Element) -> float | None:
     return _eval_number_expression(value_text) * LENGTH_TO_MM[unit_text]
 
 
-# Stoichiometric materials need atomic masses so their integer composition can be turned
-# into the mass fractions required by the interaction-length mixture rule.
 def _read_atomic_mass_g_mol(element_element: xml_tree.Element) -> float:
     """Read the atomic mass needed to convert stoichiometric counts into mass fractions."""
     atom_element = element_element.find("atom")
@@ -157,8 +146,8 @@ def _read_atomic_mass_g_mol(element_element: xml_tree.Element) -> float:
     return _eval_number_expression(value_text)
 
 
-# Fail early when a requested material name is missing from the loaded graph.
 def _require_entry(material_name: str, material_library: MaterialLibrary) -> MaterialEntry:
+    """Look up one material entry by name."""
     try:
         return material_library.entries_by_name[material_name]
     except KeyError as error:
@@ -170,13 +159,12 @@ def load_material_library(
     materials_xml_path: Path = MATERIALS_XML_PATH,
 ) -> MaterialLibrary:
     """Load the primitive and composite material graph from the repo XML definitions."""
-    # First collect the primitive element masses and interaction lengths from elements.xml.
-    entries_by_name: Dict[str, MaterialEntry] = {}
-    atomic_mass_by_symbol: Dict[str, float] = {}
+    # Collect the primitive element masses from elements.xml first.
+    entries_by_name: dict[str, MaterialEntry] = {}
+    atomic_mass_by_symbol: dict[str, float] = {}
 
     elements_root = _read_xml_root(elements_xml_path)
-    # The <element> entries carry the atomic masses that later turn stoichiometric counts
-    # into the mass fractions needed by the interaction-length rule.
+    # Read atomic masses from the <element> entries.
     for child_element in elements_root:
         if child_element.tag != "element":
             continue
@@ -188,7 +176,7 @@ def load_material_library(
         atomic_mass_by_symbol[formula_name] = atomic_mass
         atomic_mass_by_symbol[element_name] = atomic_mass
 
-    # The primitive <material> entries in elements.xml already have tabulated lambda_I values.
+    # Read primitive material entries that already carry tabulated lambda_I values.
     for child_element in elements_root:
         if child_element.tag != "material":
             continue
@@ -206,7 +194,7 @@ def load_material_library(
         if formula_name:
             entries_by_name[formula_name] = primitive_entry
 
-    # Then load the named mixtures and compounds from materials.xml and attach their pieces.
+    # Load named mixtures and compounds from materials.xml.
     materials_root = _read_xml_root(materials_xml_path)
     for material_element in materials_root.findall("material"):
         material_name = material_element.get("name")
@@ -216,8 +204,7 @@ def load_material_library(
             name=material_name,
             density_g_cm3=_read_density_g_cm3(material_element),
         )
-        # Keep only the composition-carrying children because constants and comments do not
-        # change the material mixture used by the hadronic interaction model.
+        # Keep only the child entries that define the material composition.
         for child_element in material_element:
             if child_element.tag not in {"fraction", "composite"}:
                 continue
@@ -237,15 +224,13 @@ def load_material_library(
     return MaterialLibrary(entries_by_name=entries_by_name)
 
 
-# Stoichiometric materials such as polystyrene are written in integer counts, so resolve
-# their effective molar mass before turning them into mass fractions.
 def resolve_material_mass_g_mol(
     material_name: str,
     material_library: MaterialLibrary,
 ) -> float:
     """Resolve the effective molar mass for a stoichiometric material."""
     material_entry = _require_entry(material_name, material_library)
-    # Primitive elements already know their mass, so reuse it directly.
+    # Reuse a cached or direct atomic mass when it is already available.
     if material_entry.mass_resolved_g_mol is not None:
         return material_entry.mass_resolved_g_mol
     if material_entry.atomic_mass_g_mol is not None:
@@ -260,7 +245,7 @@ def resolve_material_mass_g_mol(
             f"Material '{material_name}' is not a pure stoichiometric material and has no molar mass."
         )
 
-    # A stoichiometric material mass is just the sum of each child mass weighted by its count.
+    # Sum each child molar mass weighted by its stoichiometric count.
     resolved_mass_g_mol = 0.0
     for piece in material_entry.pieces:
         child_mass_g_mol = resolve_material_mass_g_mol(piece.name, material_library)
@@ -272,12 +257,10 @@ def resolve_material_mass_g_mol(
     return resolved_mass_g_mol
 
 
-# Convert one material definition into the mass fractions needed by the hadronic
-# interaction-length rule, whether the XML started from fractions or stoichiometric counts.
 def _mass_fractions_from_pieces(
     material_name: str,
     material_library: MaterialLibrary,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Convert one material definition into child mass fractions."""
     material_entry = _require_entry(material_name, material_library)
     if not material_entry.pieces:
@@ -285,7 +268,7 @@ def _mass_fractions_from_pieces(
 
     amount_kinds = {piece.amount_kind for piece in material_entry.pieces}
     if amount_kinds == {"fraction"}:
-        # Fraction-defined materials already encode mass weights, so only a normalization is needed.
+        # Normalize fraction-defined materials directly.
         fraction_sum = sum(piece.amount for piece in material_entry.pieces)
         if fraction_sum <= 0.0:
             raise ValueError(f"Material '{material_name}' has a non-positive total mass fraction.")
@@ -294,9 +277,8 @@ def _mass_fractions_from_pieces(
             for piece in material_entry.pieces
         }
     if amount_kinds == {"composite"}:
-        # Composite-defined materials start from integer counts, so convert them into mass
-        # fractions before applying the hadronic mixture rule.
-        weighted_masses: Dict[str, float] = {}
+        # Convert stoichiometric counts into child mass fractions.
+        weighted_masses: dict[str, float] = {}
         total_mass = 0.0
         for piece in material_entry.pieces:
             child_mass = resolve_material_mass_g_mol(piece.name, material_library)
@@ -314,43 +296,44 @@ def _mass_fractions_from_pieces(
     )
 
 
-# Resolve one material all the way down to a single nuclear interaction length in mm by
-# walking the material graph and combining child materials with the mass-fraction rule.
 def resolve_material_lambda_mm(
     material_name: str,
     material_library: MaterialLibrary,
-    _active_stack: Set[str] | None = None,
+    active_material_names: set[str] | None = None,
 ) -> float:
     """Resolve the nuclear interaction length in mm for one material."""
     material_entry = _require_entry(material_name, material_library)
-    # Reuse cached results because the same materials appear over and over across layers.
+    # Reuse cached values whenever the material was already resolved.
     if material_entry.lambda_I_resolved_mm is not None:
         return material_entry.lambda_I_resolved_mm
     if material_entry.lambda_I_mm is not None:
         material_entry.lambda_I_resolved_mm = material_entry.lambda_I_mm
         return material_entry.lambda_I_resolved_mm
 
-    # Track the active recursion chain so a malformed XML loop fails clearly.
-    if _active_stack is None:
-        _active_stack = set()
-    if material_name in _active_stack:
-        cycle_text = " -> ".join([*_active_stack, material_name])
+    # Track the active recursion path so XML cycles fail clearly.
+    if active_material_names is None:
+        active_material_names = set()
+    if material_name in active_material_names:
+        cycle_text = " -> ".join([*active_material_names, material_name])
         raise ValueError(f"Material recursion cycle detected: {cycle_text}")
-    _active_stack.add(material_name)
+    active_material_names.add(material_name)
 
     try:
-        # Once the child mass fractions are known, the material lambda_I follows from
-        # 1 / lambda_I_eff = sum(w_i / lambda_I_i).
+        # Apply the mass-fraction mixture rule to the child materials.
         mass_fractions = _mass_fractions_from_pieces(material_name, material_library)
         inverse_lambda_mm = 0.0
-        # Resolve each child first, then accumulate the inverse interaction length for the mixture.
+        # Resolve each child material before accumulating the inverse lambda_I.
         for child_name, mass_fraction in mass_fractions.items():
-            child_lambda_mm = resolve_material_lambda_mm(child_name, material_library, _active_stack)
+            child_lambda_mm = resolve_material_lambda_mm(
+                child_name,
+                material_library,
+                active_material_names,
+            )
             if child_lambda_mm <= 0.0:
                 raise ValueError(f"Material '{child_name}' resolved to a non-positive lambda_I.")
             inverse_lambda_mm += mass_fraction / child_lambda_mm
     finally:
-        _active_stack.remove(material_name)
+        active_material_names.remove(material_name)
 
     if inverse_lambda_mm <= 0.0:
         raise ValueError(f"Material '{material_name}' resolved to a non-positive inverse lambda_I.")
@@ -358,13 +341,12 @@ def resolve_material_lambda_mm(
     return material_entry.lambda_I_resolved_mm
 
 
-# The default CLI resolves the current HCAL materials so the lookup can be checked quickly
-# before the full geometry analysis uses it.
 def main() -> int:
+    """Resolve requested materials and print their lambda_I values."""
     arguments = parse_arguments()
     material_library = load_material_library()
 
-    # With no explicit names, print the materials that the current generated HCAL geometries use.
+    # Fall back to the main HCAL study materials when no names are provided.
     material_names = arguments.material if arguments.material else [
         "Air",
         "Polystyrene",

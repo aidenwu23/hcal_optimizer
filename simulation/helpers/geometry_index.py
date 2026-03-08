@@ -9,7 +9,6 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
-import re
 
 PROJECT_DIRECTORY = Path(__file__).resolve().parents[2]
 GEOMETRY_DIRECTORY = PROJECT_DIRECTORY / "geometries"
@@ -22,43 +21,27 @@ UNIT_MM: Dict[str, float] = {
     "nm": 1e-6,
 }
 
-NUMERIC_PATTERN = re.compile(r"^[+-]?\d+(?:\.\d+)?$")
-
-
 # Convert the DD4hep-style strings used in the geometry files into millimeters so the rest
 # of the geometry helpers can work with one consistent depth unit.
-def eval_length_mm(value: object, *, default: float = 0.0) -> float:
-    """Evaluate a DD4hep-style length expression in millimeter."""
+def eval_length_mm(value: object) -> float:
+    """Evaluate a required DD4hep-style length expression in millimeter."""
     if value is None:
-        return default
+        raise ValueError("Required geometry length is missing.")
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, str):
         expression = value.strip()
         if not expression:
-            return default
+            raise ValueError("Required geometry length is empty.")
         try:
             return float(expression)
         except ValueError:
             safe_locals = {**UNIT_MM, "pi": math.pi}
             try:
                 return float(eval(expression, {"__builtins__": {}}, safe_locals))
-            except Exception:
-                return default
-    return default
-
-
-# Bare numbers in the sweep parameter files are in centimeters, so multiply by 10 to get mm.
-# Anything with an explicit unit suffix (like "1.5*cm") falls through to eval_length_mm,
-# which handles the unit conversion itself. None and empty strings also fall through and
-# return the default.
-def eval_segment_length_mm(value: object, *, default: float = 0.0) -> float:
-    """Evaluate one generated HCAL segment thickness in millimeter."""
-    if isinstance(value, (int, float)):
-        return 10.0 * float(value)
-    if isinstance(value, str) and NUMERIC_PATTERN.match(value.strip()):
-        return 10.0 * float(value)
-    return eval_length_mm(value, default=default)
+            except Exception as error:
+                raise ValueError(f"Invalid geometry length expression: {value!r}") from error
+    raise ValueError(f"Unsupported geometry length value: {value!r}")
 
 # One generated geometry plus the paths and parameter payload that describe it.
 @dataclass
@@ -193,7 +176,7 @@ def derive_thickness_and_zrange(geometry_variant: GeometryVariant) -> Tuple[floa
     summary = summarize_layer_stack(layer_rows)
     total_thickness = summary.total_depth_mm
 
-    z_face_mm = eval_length_mm(geometry_variant.params.get("zmin"), default=0.0)
+    z_face_mm = eval_length_mm(geometry_variant.params.get("zmin"))
     if geometry_variant.side == "-z":
         zmax_world = -z_face_mm
         zmin_world = -(z_face_mm + total_thickness)
@@ -318,18 +301,16 @@ def _resolve_segment_recipes(geometry_variant: GeometryVariant) -> List[Geometry
         raise ValueError("Segment layer counts must sum to nLayers.")
 
     # The spacer thickness is the same for every layer across all three segments.
-    base_spacer_mm = eval_length_mm(geometry_parameters.get("t_spacer"), default=0.0)
+    base_spacer_mm = eval_length_mm(geometry_parameters.get("t_spacer"))
 
     # Build one repeated layer recipe for each longitudinal segment.
     segment_recipes: List[GeometrySegmentRecipe] = []
     for segment_index, segment_layer_count in enumerate(segment_layer_counts, start=1):
-        absorber_thickness_mm = eval_segment_length_mm(
-            geometry_parameters.get(f"t_absorber_seg{segment_index}"),
-            default=0.0,
+        absorber_thickness_mm = eval_length_mm(
+            geometry_parameters.get(f"t_absorber_seg{segment_index}")
         )
-        scintillator_thickness_mm = eval_segment_length_mm(
-            geometry_parameters.get(f"t_scin_seg{segment_index}"),
-            default=0.0,
+        scintillator_thickness_mm = eval_length_mm(
+            geometry_parameters.get(f"t_scin_seg{segment_index}")
         )
         segment_recipes.append(
             GeometrySegmentRecipe(

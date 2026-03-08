@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Dict, List
 
 import yaml
 
@@ -40,17 +39,20 @@ def parse_arguments() -> argparse.Namespace:
 def main() -> int:
     arguments = parse_arguments()
 
+    # Try importing scipy.
     try:
         from scipy.stats import qmc  # type: ignore
     except Exception as error:
         raise SystemExit("SciPy is required for Latin Hypercube generation") from error
 
+    # Resolve the template and output paths.
     template_path = resolve_project_path(arguments.template)
     output_path = resolve_project_path(arguments.out)
 
     if not template_path.exists():
         raise SystemExit(f"Template sweep file not found: {template_path}")
 
+    # Load the template YAML and check that it contains a mapping payload.
     with template_path.open("r", encoding="utf-8") as template_file:
         template_payload = yaml.safe_load(template_file)
     if template_payload is None:
@@ -58,15 +60,19 @@ def main() -> int:
     if not isinstance(template_payload, dict):
         raise SystemExit(f"Template sweep file must contain an object: {template_path}")
 
+    # Generate one Latin Hypercube point per requested variant, then scale it to the
+    # configured HCAL thickness bounds.
     sampler = qmc.LatinHypercube(d=len(LAYER_THICKNESS_BOUNDS), seed=arguments.seed)
     unit_sample = sampler.random(n=arguments.n)
 
     _, lower_bounds, upper_bounds = zip(*LAYER_THICKNESS_BOUNDS)
     scaled_sample = qmc.scale(unit_sample, lower_bounds, upper_bounds)
 
-    variants: List[Dict[str, object]] = []
+    variants: list[dict[str, object]] = []
+    # Build the YAML variant records from the scaled sample rows.
     for sample_index, sample_row in enumerate(scaled_sample):
-        variant: Dict[str, object] = {"tag": f"{arguments.tag_prefix}{sample_index:03d}"}
+        variant: dict[str, object] = {"tag": f"{arguments.tag_prefix}{sample_index:03d}"}
+        # Write one rounded parameter value for each sampled thickness dimension.
         for (parameter_name, *_), value in zip(LAYER_THICKNESS_BOUNDS, sample_row):
             variant[parameter_name] = round(float(value), 4)
         variants.append(variant)
@@ -74,6 +80,7 @@ def main() -> int:
     output_payload = dict(template_payload)
     output_payload["variants"] = variants
 
+    # Write the output.
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as output_file:
         yaml.safe_dump(output_payload, output_file, sort_keys=False)

@@ -16,6 +16,7 @@ root -l -b -q 'analysis/geometry/interaction_depth/plot_interaction_depth.C("81c
 #include <iostream>
 #include <map>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -47,6 +48,13 @@ std::vector<std::string> split_csv_line(const std::string& line) {
     fields.push_back(trim_copy(field));
   }
   return fields;
+}
+
+std::string string_arg_or_default(const char* value, const std::string& fallback) {
+  if (value && std::string(value).size()) {
+    return std::string(value);
+  }
+  return fallback;
 }
 
 // Resolve paths relative to the repo root so the macro can find the geometry-analysis outputs.
@@ -103,20 +111,31 @@ bool read_layers_csv(const std::string& geometry_id, std::vector<LayerRow>& rows
   }
 
   std::string line;
+  // Read each layer row and convert the required CSV fields into numbers.
   while (std::getline(input, line)) {
     if (trim_copy(line).empty()) {
       continue;
     }
 
     const std::vector<std::string> fields = split_csv_line(line);
+    for (const char* column_name : required_columns) {
+      if (column_index[column_name] >= fields.size()) {
+        return false;
+      }
+    }
+
     LayerRow row;
-    row.layer_index = std::stoi(fields[column_index["layer_index"]]);
-    row.depth_back_mm = std::stod(fields[column_index["depth_back_mm"]]);
-    row.delta_tau_layer = std::stod(fields[column_index["delta_tau_layer"]]);
-    row.cumulative_tau = std::stod(fields[column_index["cumulative_tau"]]);
-    row.cumulative_probability = std::stod(fields[column_index["cumulative_probability"]]);
-    row.lambda_I_eff_layer_mm = std::stod(fields[column_index["lambda_I_eff_layer_mm"]]);
-    rows.push_back(row);
+    try {
+      row.layer_index = std::stoi(fields[column_index["layer_index"]]);
+      row.depth_back_mm = std::stod(fields[column_index["depth_back_mm"]]);
+      row.delta_tau_layer = std::stod(fields[column_index["delta_tau_layer"]]);
+      row.cumulative_tau = std::stod(fields[column_index["cumulative_tau"]]);
+      row.cumulative_probability = std::stod(fields[column_index["cumulative_probability"]]);
+      row.lambda_I_eff_layer_mm = std::stod(fields[column_index["lambda_I_eff_layer_mm"]]);
+      rows.push_back(row);
+    } catch (const std::exception&) {
+      return false;
+    }
   }
 
   return !rows.empty();
@@ -133,11 +152,9 @@ void plot_interaction_depth(const char* geometry_id_cstr,
 
   const std::string geometry_id = trim_copy(std::string(geometry_id_cstr));
   const std::string out_root_path =
-      (out_root_cstr && std::string(out_root_cstr).size())
-          ? std::string(out_root_cstr)
-          : default_output_path(geometry_id);
+      string_arg_or_default(out_root_cstr, default_output_path(geometry_id));
 
-  // Load the geometry-only interaction curve that was already computed in Python.
+  // Load the geometry-only interaction curve written by the Python analysis.
   std::vector<LayerRow> layer_rows;
   if (!read_layers_csv(geometry_id, layer_rows)) {
     std::cerr << "[plot_interaction_depth] failed to read layers for " << geometry_id << ".\n";
@@ -153,42 +170,40 @@ void plot_interaction_depth(const char* geometry_id_cstr,
     return;
   }
 
-  // Keep the comparison-useful depth plots separate from the universal lambda sanity curves.
+  // Separate the depth, layer, and lambda views in the ROOT output.
   TDirectory* depth_directory = output_file.mkdir("depth");
   TDirectory* layer_directory = output_file.mkdir("layer");
   TDirectory* lambda_directory = output_file.mkdir("lambda");
 
-  // This graph shows how the cumulative interaction probability grows through real detector depth.
+  // Build the depth-based interaction plots.
   TGraph p_interact_vs_depth_mm(static_cast<int>(layer_rows.size()));
   p_interact_vs_depth_mm.SetName("p_interact_vs_depth_mm");
   p_interact_vs_depth_mm.SetTitle("Cumulative interaction probability;Depth [mm];P_{interact}");
   p_interact_vs_depth_mm.SetLineWidth(2);
 
-  // This graph shows how quickly the stack accumulates hadronic depth in physical millimeters.
   TGraph cumulative_tau_vs_depth_mm(static_cast<int>(layer_rows.size()));
   cumulative_tau_vs_depth_mm.SetName("cumulative_tau_vs_depth_mm");
   cumulative_tau_vs_depth_mm.SetTitle("Cumulative hadronic depth;Depth [mm];Cumulative #tau");
   cumulative_tau_vs_depth_mm.SetLineWidth(2);
 
-  // This graph shows how the cumulative interaction probability grows with layer number.
+  // Build the layer-index plots.
   TGraph p_interact_vs_layer(static_cast<int>(layer_rows.size()));
   p_interact_vs_layer.SetName("p_interact_vs_layer");
   p_interact_vs_layer.SetTitle("Cumulative interaction probability;Layer index;P_{interact}");
   p_interact_vs_layer.SetLineWidth(2);
 
-  // This graph shows the same cumulative interaction curve against cumulative lambda_I.
+  // Build the cumulative lambda_I plots.
   TGraph p_interact_vs_lambda(static_cast<int>(layer_rows.size()));
   p_interact_vs_lambda.SetName("p_interact_vs_lambda");
   p_interact_vs_lambda.SetTitle("Cumulative interaction probability;Cumulative #lambda_{I};P_{interact}");
   p_interact_vs_lambda.SetLineWidth(2);
 
-  // This graph shows the complementary survival probability against cumulative lambda_I.
   TGraph p_survive_vs_lambda(static_cast<int>(layer_rows.size()));
   p_survive_vs_lambda.SetName("p_survive_vs_lambda");
   p_survive_vs_lambda.SetTitle("Survival probability;Cumulative #lambda_{I};P_{survive}");
   p_survive_vs_lambda.SetLineWidth(2);
 
-  // This histogram keeps the effective interaction length of each physical layer.
+  // Build the per-layer histogram summaries.
   TH1D lambda_eff_by_layer(
       "lambda_eff_by_layer",
       "Layer effective interaction length;Layer index;#lambda_{I,eff} [mm]",
@@ -210,7 +225,7 @@ void plot_interaction_depth(const char* geometry_id_cstr,
   delta_tau_layer_by_layer.SetStats(false);
   delta_tau_layer_by_layer.SetDirectory(nullptr);
 
-  // Fill the depth and layer plots directly from the per-layer interaction-depth table.
+  // Fill every graph and histogram from the per-layer interaction table.
   for (std::size_t row_index = 0; row_index < layer_rows.size(); ++row_index) {
     const LayerRow& row = layer_rows[row_index];
     p_interact_vs_depth_mm.SetPoint(

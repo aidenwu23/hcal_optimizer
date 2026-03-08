@@ -5,7 +5,7 @@ histogram those layer-energy values.
 
 Basically a graph of how many scintillator layers had what amount of energy deposited.
 
-root -l -b -q 'simulation/analysis/layer_energy_spectrum.C("data/raw/<geom_id>/<run_id>.edm4hep.root","layer_energy_spectrum.root")'
+root -l -b -q 'analysis/simulation/layer_energy_spectrum.C("data/raw/<geom_id>/<run_id>.edm4hep.root","layer_energy_spectrum.root")'
 
 */
 #include <TH1D.h>

@@ -4,7 +4,7 @@ Histogram the start_layer values stored in a processed events.root file.
 The histogram includes one extra bin for start_layer = -1 so you can see how
 many events never crossed the start threshold in any active HCAL layer.
 
-root -l -b -q 'simulation/analysis/start_layer_hist.C("data/processed/9d9b1d6b/run7fe93f121f/events.root","start_layer_hist.root")'
+root -l -b -q 'analysis/simulation/start_layer_hist.C("data/processed/9d9b1d6b/run7fe93f121f/events.root","start_layer_hist.root")'
 */
 
 #include <TH1D.h>

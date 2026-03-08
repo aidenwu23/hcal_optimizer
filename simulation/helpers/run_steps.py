@@ -269,7 +269,7 @@ def run_neutron_calibration(
 def run_performance_analysis(args: argparse.Namespace, run_plan: RunPlan) -> float:
     """Run the fixed performance analysis step for one processed run."""
     ensure_dir(run_plan.performance_path.parent)
-    performance_macro_path = SIMULATION_DIRECTORY / "analysis" / "performance.C"
+    performance_macro_path = PROJECT_DIRECTORY / "analysis" / "simulation" / "performance.C"
     command = [
         args.root_bin,
         "-l",

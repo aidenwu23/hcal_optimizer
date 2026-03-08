@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Run the geometry-only interaction-depth analysis and ROOT plotting in one step."""
-# python analysis/geometry/run_interaction_depth.py --geometry-json geometries/generated/<geom_id>/geometry.json
+"""Run the geometry-only interaction-depth analysis and ROOT plotting in one step.
+python analysis/geometry/run_interaction_depth.py --geometry-json geometries/generated/<geom_id>/geometry.json
+"""
 
 from __future__ import annotations
 

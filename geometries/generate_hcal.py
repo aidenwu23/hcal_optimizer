@@ -16,7 +16,7 @@ PROJECT_DIRECTORY = Path(__file__).resolve().parents[1]
 DEFAULT_TEMPLATE_PATH = "geometries/templates/hcal_template.xml"
 DEFAULT_OUTPUT_DIRECTORY = "geometries/generated"
 RESERVED_PARAMETER_KEYS = {"geometry_id"}
-LEGACY_PARAMETER_KEYS = {
+INVALID_PARAMETER_KEYS = {
     "t_absorber",
     "t_scin",
     "t_tape",
@@ -127,11 +127,11 @@ def parse_int_value(value_text: str, key_text: str) -> int:
 
 
 def validate_parameter_contract(parameter_values: Dict[str, str]) -> None:
-    legacy_keys = sorted(key_text for key_text in parameter_values if key_text in LEGACY_PARAMETER_KEYS)
-    if legacy_keys:
-        joined_keys = ", ".join(legacy_keys)
+    invalid_keys = sorted(key_text for key_text in parameter_values if key_text in INVALID_PARAMETER_KEYS)
+    if invalid_keys:
+        joined_keys = ", ".join(invalid_keys)
         raise ValueError(
-            "Legacy HCAL parameters are no longer supported: "
+            "Invalid HCAL parameters: "
             f"{joined_keys}. Use t_spacer, spacerMaterial, "
             "t_absorber_seg1/2/3, and t_scin_seg1/2/3."
         )

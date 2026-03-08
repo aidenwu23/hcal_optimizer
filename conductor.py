@@ -15,7 +15,6 @@ python3 conductor.py \
     --events-per-run 2000 \
     --gun-particle neutron \
     --gun-energy 5 \
-    --start-alpha 0.2 \
     --seeds 67 \
     --overwrite
 """
@@ -77,14 +76,6 @@ def parse_args() -> argparse.Namespace:
         help="Override the expected MC PDG code; defaults to gun particle lookup when available.",
     )
     parser.add_argument("--muon-threshold", type=float, default=0.05, help="Visible-energy threshold (GeV) used when no muon control calibration overrides it.")
-    # 0.2 x muon_99th_percentile is about 2 x (event_threshold / N_layers) for this 10-layer HCAL,
-    # which makes it a rough 2 x per-layer MIP threshold for the shower-start proxy.
-    parser.add_argument(
-        "--start-alpha",
-        type=float,
-        default=0.2,
-        help="Scale factor applied to the muon-calibrated detect threshold to derive the start-layer threshold.",
-    )
     parser.add_argument("--manifest-json", default=str(DATA_DIRECTORY / "manifests" / "run_manifest.json"), help="Path for JSON run manifest.")
     parser.add_argument("--manifest-csv", default=str(DATA_DIRECTORY / "manifests" / "run_manifest.csv"), help="Path for CSV run manifest.")
     parser.add_argument("--dry-run", action="store_true", help="Print actions without executing external commands.")
@@ -132,16 +123,11 @@ def main() -> None:
         print("No geometry variants found; nothing to do.")
         return
 
-    # Prepare the processor flags and validate that the start-layer threshold is controlled
-    # through the dedicated conductor options rather than ad hoc processor extras.
+    # Prepare any optional processor flags that should be threaded through every run.
     extra_process_flags = flatten_process_extras(args.process_extra)
-    if "--start-threshold" in extra_process_flags:
-        raise ValueError("Pass start threshold scaling with --start-alpha instead of --process-extra.")
-    if args.start_alpha <= 0.0:
-        raise ValueError("--start-alpha must be positive.")
 
     # Non-muon production needs a muon control sample first so each geometry gets a calibrated
-    # visible-energy threshold before the shower-start proxy is evaluated.
+    # visible-energy threshold for the detection and neutron-response summaries.
     muon_threshold_by_geometry_id: Dict[str, float] = {}
     gun_particle = args.gun_particle.strip().lower()
     running_muon_sample = gun_particle in ("mu-", "mu+")
@@ -180,16 +166,12 @@ def main() -> None:
         saved_muon_threshold = args.muon_threshold
 
         try:
-            # For non-muon production, convert the per-geometry muon control threshold into the
-            # start-layer threshold used by the processor.
-            resolved_start_threshold = None
             neutron_scale = None
             if not running_muon_sample:
                 geometry_id = run_plan.geometry_variant.geometry_id
                 if geometry_id not in muon_threshold_by_geometry_id:
                     raise RuntimeError(f"Missing muon calibration threshold for geometry {geometry_id}")
                 args.muon_threshold = muon_threshold_by_geometry_id[geometry_id]
-                resolved_start_threshold = args.start_alpha * args.muon_threshold
 
             # Run the detector simulation first, then process the output, then attach any
             # calibration and performance products that belong to this sample type.
@@ -198,7 +180,6 @@ def main() -> None:
                 args,
                 run_plan,
                 extra_process_flags,
-                start_threshold_GeV=resolved_start_threshold,
             )
             if run_plan.gun_particle.strip().lower() == "neutron":
                 _, neutron_scale = run_neutron_calibration(args, run_plan)

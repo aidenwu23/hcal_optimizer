@@ -159,14 +159,11 @@ def run_ddsim(args: argparse.Namespace, run_plan: RunPlan) -> float:
     return time.time() - start
 
 
-# Run the processor on one raw EDM4hep file and optionally inject the start-layer threshold
-# derived from the muon control calibration.
+# Run the processor on one raw EDM4hep file.
 def run_process(
     args: argparse.Namespace,
     run_plan: RunPlan,
     extra_process_flags: List[str],
-    *,
-    start_threshold_GeV: Optional[float] = None,
 ) -> Tuple[float, List[str]]:
     """Invoke the processor on the raw EDM4hep file and report elapsed time."""
     ensure_dir(run_plan.events_path.parent)
@@ -179,11 +176,9 @@ def run_process(
         str(run_plan.events_path),
     ] + extra_process_flags
 
-    # Attach the expected primary PDG and start-threshold settings when the run plan provides them.
+    # Attach the expected primary PDG when the run plan provides it.
     if run_plan.expected_pdg is not None:
         command.extend(["--expected-pdg", str(run_plan.expected_pdg)])
-    if start_threshold_GeV is not None:
-        command.extend(["--start-threshold", f"{start_threshold_GeV:.12g}"])
     start = time.time()
     run_cmd(command, dry_run=args.dry_run, label="process")
     return time.time() - start, command

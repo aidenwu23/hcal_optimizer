@@ -1,17 +1,12 @@
 // CLI:
 //   process <input.edm4hep.root> [--out out.root]
-//            [--expected-pdg PDG] [--start-threshold GeV] [--debug]
+//            [--expected-pdg PDG] [--debug]
 
-#include <array>
 #include <cmath>
-#include <cstdint>
-#include <cstdlib>
-#include <iostream>
-#include <string>
 #include <algorithm>
-#include <limits>
+#include <iostream>
 #include <optional>
-#include <stdexcept>
+#include <string>
 
 // ROOT I/O
 #include "TFile.h"
@@ -23,26 +18,11 @@
 #include "edm4hep/MCParticleCollection.h"
 #include "edm4hep/SimCalorimeterHitCollection.h"
 
-namespace {
-
-constexpr int kHcalLayerCount = 10;
-constexpr int kLayerBitOffset = 8;
-constexpr std::uint64_t kLayerMask = 0xFF;
-
-int decode_hcal_layer(std::uint64_t cell_id) {
-  return static_cast<int>((cell_id >> kLayerBitOffset) & kLayerMask);
-}
-
-}  // namespace
-
 static bool hasArg(int argc, char** argv, const std::string& key) {
   for (int i = 1; i < argc; ++i) if (key == argv[i]) return true; return false;
 }
 static std::string getArg(int argc, char** argv, const std::string& key, const std::string& def="") {
   for (int i = 1; i < argc - 1; ++i) if (key == argv[i]) return std::string(argv[i+1]); return def;
-}
-static double getArgD(int argc, char** argv, const std::string& key, double def) {
-  const auto s = getArg(argc, argv, key, ""); return s.empty() ? def : std::stod(s);
 }
 static int getArgI(int argc, char** argv, const std::string& key, int def) {
   const auto s = getArg(argc, argv, key, ""); return s.empty() ? def : std::stoi(s);
@@ -61,7 +41,7 @@ int main(int argc, char** argv) {
     std::cout <<
       "Usage: process <input.edm4hep.root> [--out out.root]\n"
       "                [--expected-pdg PDG]\n"
-      "                [--start-threshold GeV] [--debug]\n";
+      "                [--debug]\n";
     return 0;
   }
 
@@ -69,7 +49,6 @@ int main(int argc, char** argv) {
   const std::string inFile   = argv[1];
   const std::string outFile  = getArg(argc, argv, "--out", "events.root");
   const int expectedPDG      = getArgI(argc, argv, "--expected-pdg", 0);
-  const double start_threshold_GeV = getArgD(argc, argv, "--start-threshold", 1e-2);
 
   TFile* fout = TFile::Open(outFile.c_str(), "RECREATE");
   if (!fout || fout->IsZombie()) {
@@ -79,12 +58,10 @@ int main(int argc, char** argv) {
 
   float  t_mc_E=0;
   float  t_visible_E=0;
-  int    t_start_layer=-1;
 
   TTree* events = new TTree("events", "per-event dataset");
   events->Branch("mc_E",   &t_mc_E);
   events->Branch("visible_E",  &t_visible_E);
-  events->Branch("start_layer", &t_start_layer);
   size_t nEvents=0, nWithMC=0, nWithSim=0;
 
   podio::ROOTReader reader;
@@ -144,12 +121,12 @@ int main(int argc, char** argv) {
         const bool not_from_sim = !p.isCreatedInSimulation();
         const int pdg = p.getPDG();
 
-        // Keep the highest-energy fallback candidate that was not created in simulation.
+        // Among particles not created in simulation, keep the highest-energy candidate.
         if (not_from_sim && energy > not_from_sim_candidate_energy) {
           not_from_sim_candidate = p;
           not_from_sim_candidate_energy = energy;
         }
-        // Keep the highest-energy fallback candidate regardless of origin or PDG.
+        // Keep the highest-energy particle in the full MC collection.
         if (energy > highest_energy_candidate_energy) {
           highest_energy_candidate = p;
           highest_energy_candidate_energy = energy;
@@ -190,8 +167,6 @@ int main(int argc, char** argv) {
     }
 
     t_visible_E = 0.f;
-    t_start_layer = -1;
-    std::array<double, kHcalLayerCount> layer_sim_energy_GeV {};
 
     // Load the calorimeter hit collection and collapse it to one total energy.
     const edm4hep::SimCalorimeterHitCollection* simCollection = nullptr;
@@ -207,29 +182,10 @@ int main(int argc, char** argv) {
       for (const auto& hit : *simCollection) {
         const double e = hit.getEnergy();
         t_visible_E += (float)e;
-        // The readout encoding reserves bits 8..15 for the logical layer index.
-        const int layer_index = decode_hcal_layer(static_cast<std::uint64_t>(hit.getCellID()));
-        if (layer_index < 0 || layer_index >= kHcalLayerCount) {
-          throw std::runtime_error("Decoded HCAL layer index is out of range.");
-        }
-        // Sum energy deposited within layer.
-        layer_sim_energy_GeV[static_cast<std::size_t>(layer_index)] += e;
-      }
-    }
-
-    for (int layer_index = 0; layer_index < kHcalLayerCount; ++layer_index) {
-      // Loop through all layers in order and record the first layer that meets a certain threshold of energy.
-      if (layer_sim_energy_GeV[static_cast<std::size_t>(layer_index)] > start_threshold_GeV) {
-        t_start_layer = layer_index;
-        break;
       }
     }
 
     t_mc_E = (float)mcE;
-    if (debug && nEvents==1) {
-      std::cerr << "[process] start-threshold=" << start_threshold_GeV
-                << " GeV | start_layer=" << t_start_layer << "\n";
-    }
     events->Fill();
   }
 

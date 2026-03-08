@@ -9,6 +9,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
+import re
 
 PROJECT_DIRECTORY = Path(__file__).resolve().parents[2]
 GEOMETRY_DIRECTORY = PROJECT_DIRECTORY / "geometries"
@@ -20,6 +21,8 @@ UNIT_MM: Dict[str, float] = {
     "um": 0.001,
     "nm": 1e-6,
 }
+
+NUMERIC_PATTERN = re.compile(r"^[+-]?\d+(?:\.\d+)?$")
 
 
 # Convert the DD4hep-style strings used in the geometry files into millimeters so the rest
@@ -43,6 +46,23 @@ def eval_length_mm(value: object, *, default: float = 0.0) -> float:
             except Exception:
                 return default
     return default
+
+
+# The generated HCAL sweep points use bare numbers for thickness values, but they should be 
+# in centimeters, so we multiply it by 10 and reuse the eval_length_mm on it.
+def eval_segment_length_mm(value: object, *, default: float = 0.0) -> float:
+    """Evaluate one generated HCAL segment thickness in millimeter."""
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return 10.0 * float(value)
+    if isinstance(value, str):
+        expression = value.strip()
+        if not expression:
+            return default
+        if NUMERIC_PATTERN.match(expression):
+            return 10.0 * float(expression)
+    return eval_length_mm(value, default=default)
 
 # One generated geometry plus the paths and parameter payload that describe it.
 @dataclass
@@ -306,11 +326,11 @@ def _resolve_segment_recipes(geometry_variant: GeometryVariant) -> List[Geometry
     # Build one repeated layer recipe for each longitudinal segment.
     segment_recipes: List[GeometrySegmentRecipe] = []
     for segment_index, segment_layer_count in enumerate(segment_layer_counts, start=1):
-        absorber_thickness_mm = eval_length_mm(
+        absorber_thickness_mm = eval_segment_length_mm(
             geometry_parameters.get(f"t_absorber_seg{segment_index}"),
             default=0.0,
         )
-        scintillator_thickness_mm = eval_length_mm(
+        scintillator_thickness_mm = eval_segment_length_mm(
             geometry_parameters.get(f"t_scin_seg{segment_index}"),
             default=0.0,
         )

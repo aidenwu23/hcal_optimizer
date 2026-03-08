@@ -26,6 +26,14 @@ INVALID_PARAMETER_KEYS = {
     "t_spacer_seg3",
 }
 NUMERIC_PATTERN = re.compile(r"^[+-]?\d+(?:\.\d+)?$")
+SEGMENT_LENGTH_KEYS = {
+    "t_absorber_seg1",
+    "t_absorber_seg2",
+    "t_absorber_seg3",
+    "t_scin_seg1",
+    "t_scin_seg2",
+    "t_scin_seg3",
+}
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -183,10 +191,19 @@ def convert_json_value(value_text: str) -> object:
     return value_text
 
 
+# Keep the generated HCAL segment thicknesses explicit in centimeters so later tools do not
+# have to guess whether a bare number was meant to be mm or cm.
+def normalize_hcal_parameter_value(key_text: str, value_text: str) -> str:
+    stripped_value = value_text.strip()
+    if key_text in SEGMENT_LENGTH_KEYS and NUMERIC_PATTERN.match(stripped_value):
+        return f"{stripped_value}*cm"
+    return stripped_value
+
+
 def create_json_payload(parameter_values: Dict[str, str], geometry_id: str) -> Dict[str, object]:
     payload: Dict[str, object] = {"geometry_id": geometry_id}
     for key_text, value_text in sorted(parameter_values.items()):
-        payload[key_text] = convert_json_value(value_text)
+        payload[key_text] = convert_json_value(normalize_hcal_parameter_value(key_text, value_text))
     return payload
 
 
@@ -248,7 +265,11 @@ def main() -> None:
     output_xml_path, output_parameter_path = choose_output_paths(arguments, geometry_id)
 
     for key_text, value_text in sorted(parameter_values.items()):
-        set_detector_parameter(detector_element, key_text, value_text)
+        set_detector_parameter(
+            detector_element,
+            key_text,
+            normalize_hcal_parameter_value(key_text, value_text),
+        )
 
     output_parameter_payload = create_json_payload(parameter_values, geometry_id)
     output_xml_path.parent.mkdir(parents=True, exist_ok=True)
@@ -265,7 +286,10 @@ def main() -> None:
         f" ParameterSource: {parameter_source_text}",
         " MergedParameters:",
     ]
-    comment_lines.extend(f"   - {key_text} = {value_text}" for key_text, value_text in sorted(parameter_values.items()))
+    comment_lines.extend(
+        f"   - {key_text} = {normalize_hcal_parameter_value(key_text, value_text)}"
+        for key_text, value_text in sorted(parameter_values.items())
+    )
     root_element.insert(0, xml_tree.Comment("\n" + "\n".join(comment_lines) + "\n"))
 
     if arguments.dry_run:

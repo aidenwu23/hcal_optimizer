@@ -4,10 +4,10 @@
 Example usage:
     python3 bayesian_optimization.py \
         --init-training True \
-        --rounds 2 \
+        --rounds 5 \
         --sweep-template geometries/sweeps/template_sweep.yaml \
         --lhs-sweep geometries/sweeps/sweep000.yaml \
-        --lhs-variants 5 \
+        --lhs-variants 250 \
         --tag-prefix lhs \
         --training-csv csv_data/training.csv \
         --model model/lgbm_surrogate.joblib \
@@ -15,7 +15,7 @@ Example usage:
         --sweep-yaml geometries/sweeps/sweep_bo001.yaml \
         --processed-root data/processed \
         --pool 20000 \
-        --bo-variants 3 \
+        --bo-variants 5 \
         --seed 10
 """
 
@@ -26,6 +26,7 @@ import os
 import subprocess
 from pathlib import Path
 import shutil
+import pandas as pd
 
 
 
@@ -88,14 +89,14 @@ def main():
         print(f"\n=== BO round {r:03d} ===")
 
 
-        # 4. Train surrogate on current master dataset
+        # 1. Train surrogate on current master dataset
         run_cmd([
             "python3", "surrogate/train_surrogate.py",
             "--training-csv", args.training_csv,
             "--output-model", args.model
         ])
         
-        # 1. Propose next batch
+        # 2. Propose next batch
         #sweep_yaml = args.workdir / f"sweep_bo001.yaml" 
         run_cmd([
             "python3", "surrogate/propose_bo.py",
@@ -107,16 +108,16 @@ def main():
             "--seed", str(args.seed + r),
         ])
 
-        # 2. Run the sweep / simulations
+        # 3. Run the sweep / simulations
         run_cmd([
             "python3", "conductor.py",
             "--spec", args.sweep_yaml,
             "--events-per-run", "2000",
-            "--seed", str(67 + r),
+            "--seed", str(args.seed + r),
             "--overwrite"
         ])
 
-        # 3. Collect this round's results into CSV
+        # 4. Collect this round's results into CSV
         run_cmd([
             "python3", "surrogate/aggregator.py",
             "--processed-root", args.processed_root,
@@ -125,6 +126,20 @@ def main():
 
     #make script that will select the best geoometry parameters and performance 
     
+    # Output CSV file
+    output_csv = "csv_data/best_geometry_configuration.csv"
+
+    # Read the CSV file
+    df = pd.read_csv(args.training_csv)
+
+    # Find the row with the maximum detection_efficiency
+    max_row = df.loc[df["detection_efficiency"].idxmax()]
+
+    # Convert the row to a DataFrame and save to CSV
+    max_row.to_frame().T.to_csv(output_csv, index=False)
+
+    print("Best geometry configuration saved to:", output_csv)
+    print(max_row)
 
 if __name__ == "__main__":
     main()

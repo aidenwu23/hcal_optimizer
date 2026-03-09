@@ -3,9 +3,8 @@ Build a geometry display for one geometry ID and overlay MC particle segments
 from the first N events of that geometry's first non-muon-control raw run.
 
 Example:
-python visuals/visualize.py --geometry-id 81c3da7d -n 1
+python3 visuals/visualize.py --geometry-id dc340310 -n 1
 """
-
 import argparse
 import math
 from pathlib import Path

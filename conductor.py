@@ -3,8 +3,8 @@
 
 Run the HCAL production campaign from geometry sweeps through manifests.
 Example: 
-python3 conductor.py --spec geometries/sweeps/test_run.yaml \
-  --events-per-run 2000 \
+python3 conductor.py --spec geometries/sweeps/bad_sweep.yaml \
+  --events-per-run 1 \
   --seed 67 \
   --overwrite
 """

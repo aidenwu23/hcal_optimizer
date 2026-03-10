@@ -2,8 +2,8 @@
 """Generate a sweep YAML file using Latin Hypercube sampling.
 python3 geometries/generate_lhs.py \
   --template geometries/sweeps/template_sweep.yaml \
-  --out geometries/sweeps/sweep000.yaml \
-  --n 3
+  --out geometries/sweeps/full_run.yaml \
+  --n 150
 
 """
 

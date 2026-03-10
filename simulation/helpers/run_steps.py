@@ -26,6 +26,19 @@ def ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
+def maybe_remove_file(args: argparse.Namespace, path: Path) -> None:
+    # Remove one intermediate file after every downstream consumer has finished.
+    if not args.delete_intermediates:
+        return
+    if args.dry_run:
+        print(f"[delete_intermediates] remove {path}")
+        return
+    if not path.exists():
+        return
+    path.unlink()
+    print(f"[delete_intermediates] removed {path}")
+
+
 # Print and execute one external command so the orchestration logs show exactly what ran.
 def run_cmd(command: Sequence[str], *, dry_run: bool, label: str) -> subprocess.CompletedProcess:
     """Execute a subprocess, emitting the command for easier debugging."""
@@ -73,6 +86,7 @@ def maybe_run_sweeps(args: argparse.Namespace, spec_paths: List[Path]) -> None:
 
 # Produce the muon control calibration that defines the visible-energy detect threshold for one geometry.
 def run_muon_calibration(args: argparse.Namespace, geometry_variant: GeometryVariant) -> Path:
+    # Run the muon control chain and optionally remove its ROOT intermediates afterward.
     calibration_directory = DATA_DIRECTORY / "processed" / geometry_variant.geometry_id / "run_mu_ctrl"
     ensure_dir(calibration_directory)
     output_path = calibration_directory / "fpr_calibration.json"
@@ -87,6 +101,7 @@ def run_muon_calibration(args: argparse.Namespace, geometry_variant: GeometryVar
     # processor chain, then calibrate_fpr.py fits the visible-energy distribution and returns the
     # threshold that keeps the false-positive rate at the requested level.
     raw_output_path = DATA_DIRECTORY / "raw" / geometry_variant.geometry_id / "run_mu_ctrl" / "run_mu_ctrl.edm4hep.root"
+    events_output_path = calibration_directory / "events.root"
     ensure_dir(raw_output_path.parent)
     command = [
         args.python,
@@ -96,7 +111,7 @@ def run_muon_calibration(args: argparse.Namespace, geometry_variant: GeometryVar
         "--raw-out",
         str(raw_output_path),
         "--events-out",
-        str(calibration_directory / "events.root"),
+        str(events_output_path),
         "--json-out",
         str(output_path),
         "--ddsim",
@@ -117,6 +132,8 @@ def run_muon_calibration(args: argparse.Namespace, geometry_variant: GeometryVar
         "0.01",
     ]
     run_cmd(command, dry_run=args.dry_run, label="muon_calibration")
+    maybe_remove_file(args, raw_output_path)
+    maybe_remove_file(args, events_output_path)
     return output_path
 
 

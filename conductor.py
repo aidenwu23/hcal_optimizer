@@ -3,6 +3,16 @@
 
 Run the HCAL production campaign from geometry sweeps through manifests.
 Example: 
+python3 conductor.py --spec geometries/sweeps/sweep000.yaml \
+  --events-per-run 2000 \
+  --delete-intermediates \
+  --overwrite
+
+python3 conductor.py --spec geometries/sweeps/sweep001.yaml \
+  --events-per-run 2000 \
+  --delete-intermediates \
+  --overwrite
+
 python3 conductor.py --spec geometries/sweeps/bhcal.yaml \
   --events-per-run 2000 \
   --seed 67 \
@@ -23,6 +33,7 @@ from simulation.helpers.run_plan import RunRecord, build_run_plans
 from simulation.helpers.run_steps import (
     DATA_DIRECTORY,
     flatten_process_extras,
+    maybe_remove_file,
     maybe_run_sweeps,
     run_ddsim,
     run_neutron_calibration,
@@ -70,6 +81,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--manifest-csv", default=str(DATA_DIRECTORY / "manifests" / "run_manifest.csv"), help="Path for CSV run manifest.")
     parser.add_argument("--dry-run", action="store_true", help="Print actions without executing external commands.")
     parser.add_argument("--overwrite", action="store_true", help="Re-run even if outputs already exist.")
+    parser.add_argument(
+        "--delete-intermediates",
+        action="store_true",
+        help="Delete intermediate ROOT files after downstream steps finish successfully.",
+    )
     parser.add_argument("--python", default=sys.executable, help="Python interpreter for helper scripts.")
     return parser.parse_args()
 
@@ -168,12 +184,14 @@ def main() -> None:
                     run_plan,
                     extra_process_flags,
                 )
+                maybe_remove_file(args, run_plan.raw_path)
                 if is_neutron:
                     _, neutron_scale = run_neutron_calibration(args, run_plan)
                 run_record.meta_seconds = write_metadata(args, run_plan)
                 write_calibration(args, run_plan, neutron_scale)
                 if is_neutron:
                     run_record.performance_seconds = run_performance_analysis(args, run_plan)
+                maybe_remove_file(args, run_plan.events_path)
                 run_record.status = "completed"
             except subprocess.CalledProcessError as exc:
                 run_record.status = "failed"

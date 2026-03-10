@@ -10,6 +10,11 @@
 #   t_absorber_seg1/2/3, t_scin_seg1/2/3, t_spacer,
 #   gun_energy_GeV, detect_threshold_GeV,
 #   detection_efficiency, eff_lo, eff_hi, energy_resolution
+"""
+python3 surrogate/aggregator.py \
+  --processed-root data/processed \
+  --out surrogate/csv_data/training.csv
+"""
 
 import argparse, json
 from pathlib import Path

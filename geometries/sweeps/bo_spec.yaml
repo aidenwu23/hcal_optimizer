@@ -25,13 +25,13 @@ sweep_base:
 # Geometry variables proposed by BO.
 # Geometry-space thickness units here are cm.
 bounds:
-  t_absorber_seg1: {low: 0.2, high: 6.0, type: float}
-  t_absorber_seg2: {low: 0.2, high: 6.0, type: float}
-  t_absorber_seg3: {low: 0.2, high: 6.0, type: float}
+  t_absorber_seg1: {low: 3.5, high: 4.5, type: float}
+  t_absorber_seg2: {low: 3.5, high: 4.5, type: float}
+  t_absorber_seg3: {low: 3.5, high: 4.5, type: float}
 
-  t_scin_seg1: {low: 0.10, high: 1.0, type: float}
-  t_scin_seg2: {low: 0.10, high: 1.0, type: float}
-  t_scin_seg3: {low: 0.10, high: 1.0, type: float}
+  t_scin_seg1: {low: 0.3, high: 0.6, type: float}
+  t_scin_seg2: {low: 0.3, high: 0.6, type: float}
+  t_scin_seg3: {low: 0.3, high: 0.6, type: float}
 
 # Fixed surrogate inputs that are not part of the geometry proposal
 fixed_features:

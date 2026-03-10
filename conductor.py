@@ -4,17 +4,20 @@
 Run the HCAL production campaign from geometry sweeps through manifests.
 Example: 
 python3 conductor.py --spec geometries/sweeps/sweep000.yaml \
-  --events-per-run 2000 \
+  --muon-events 2000 \
+  --neutron-events 2000 \
   --delete-intermediates \
   --overwrite
 
 python3 conductor.py --spec geometries/sweeps/sweep001.yaml \
-  --events-per-run 2000 \
+  --muon-events 2000 \
+  --neutron-events 2000 \
   --delete-intermediates \
   --overwrite
 
 python3 conductor.py --spec geometries/sweeps/bhcal.yaml \
-  --events-per-run 2000 \
+  --muon-events 2000 \
+  --neutron-events 2000 \
   --seed 67 \
   --overwrite
 """
@@ -69,7 +72,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gun-energy", type=float, nargs="+", default=[5.0], help="Gun energies in GeV (default: 5).")
     parser.add_argument("--gun-position", default="0 0 0", help="Gun position string passed to ddsim.")
     parser.add_argument("--gun-direction", default="0 0 -1", help="Gun direction string passed to ddsim.")
-    parser.add_argument("--events-per-run", type=int, default=1, help="Number of events per ddsim run.")
+    parser.add_argument("--neutron-events", type=int, default=1, help="Number of signal events per ddsim run.")
+    parser.add_argument(
+        "--muon-events",
+        type=int,
+        default=2000,
+        help="Number of muon-control events used for threshold calibration.",
+    )
     parser.add_argument("--seeds", type=int, nargs="+", help="Random seeds for ddsim. Omit to let ddsim pick its own.")
     parser.add_argument(
         "--expected-pdg",

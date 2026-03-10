@@ -123,7 +123,7 @@ def build_run_plans(
                     args.gun_particle,
                     energy,
                     seed,
-                    args.events_per_run,
+                    args.neutron_events,
                     run_id_tokens,
                 )
                 # Keep the raw EDM4hep file and the processed outputs in their standard campaign locations.
@@ -137,7 +137,7 @@ def build_run_plans(
                         gun_direction=gun_direction,
                         gun_position=gun_position,
                         seed=seed,
-                        n_events=args.events_per_run,
+                        n_events=args.neutron_events,
                         run_id=run_id,
                         run_id_int=run_id_int,
                         raw_path=raw_output_directory / f"{run_id}.edm4hep.root",

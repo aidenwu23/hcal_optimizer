@@ -74,7 +74,7 @@ def main():
         run_cmd([
             "python3", "conductor.py",
             "--spec", args.lhs_sweep,
-            "--events-per-run", "2000",
+            "--neutron-events", "2000",
             "--seed", args.seed,
             "--overwrite"
         ])
@@ -112,7 +112,7 @@ def main():
         run_cmd([
             "python3", "conductor.py",
             "--spec", args.sweep_yaml,
-            "--events-per-run", "2000",
+            "--neutron-events", "2000",
             "--seed", str(args.seed + r),
             "--overwrite"
         ])

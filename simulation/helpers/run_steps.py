@@ -125,7 +125,7 @@ def run_muon_calibration(args: argparse.Namespace, geometry_variant: GeometryVar
         "--gun-energy",
         "10*GeV",
         "--n-events",
-        "2000",
+        str(args.muon_events),
         "--metric",
         "visible_E",
         "--target-fpr",

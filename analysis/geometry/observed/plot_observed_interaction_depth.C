@@ -3,7 +3,9 @@ Build observed interaction-depth curves from raw HCAL hits.
 The macro marks the first layer above a muon-calibrated threshold and writes cumulative curves.
 
 Example:
-root -l -b -q 'analysis/geometry/plot_observed_interaction_depth.C("data/raw/2663fc88/run42d6c963ff.edm4hep.root")'
+root -l -b -q 'analysis/geometry/observed/plot_observed_interaction_depth.C("data/raw/81c3da7d/rune3896ec0d8.edm4hep.root")'
+root -l -b -q 'analysis/geometry/observed/plot_observed_interaction_depth.C("data/raw/e5333e82/run7bbd931745.edm4hep.root")'
+root -l -b -q 'analysis/geometry/observed/plot_observed_interaction_depth.C("data/raw/3a2e74e3/runfc6edabae2.edm4hep.root")'
 */
 
 #include <TDirectory.h>
@@ -54,7 +56,7 @@ int decode_hcal_layer(std::uint64_t cell_id) {
 
 std::string project_root_from_macro() {
   std::filesystem::path macro_path(__FILE__);
-  return macro_path.parent_path().parent_path().parent_path().string();
+  return macro_path.parent_path().parent_path().parent_path().parent_path().string();
 }
 
 std::string derive_run_id_from_raw_path(const std::string& raw_path) {

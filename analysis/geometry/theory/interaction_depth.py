@@ -14,7 +14,7 @@ from typing import List
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from analysis.geometry.interaction_depth.material_lambda import (
+from analysis.geometry.theory.material_lambda import (
     MaterialLibrary,
     load_material_library,
     resolve_material_lambda_mm,

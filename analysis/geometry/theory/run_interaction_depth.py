@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run the geometry-only interaction-depth analysis and ROOT plotting in one step.
-python analysis/geometry/run_interaction_depth.py --geometry-json geometries/generated/<geom_id>/geometry.json
+python analysis/geometry/theory/run_interaction_depth.py \
+  --geometry-json geometries/generated/<geom_id>/geometry.json
 """
 
 from __future__ import annotations
@@ -11,9 +12,9 @@ import subprocess
 import sys
 
 if __package__ in {None, ""}:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from analysis.geometry.interaction_depth.interaction_depth import (
+from analysis.geometry.theory.interaction_depth import (
     OUTPUT_DIRECTORY,
     _load_geometry_variant_from_json_path,
     analyze_geometry,
@@ -22,9 +23,9 @@ from analysis.geometry.interaction_depth.interaction_depth import (
     write_summary_json,
 )
 
-PROJECT_DIRECTORY = Path(__file__).resolve().parents[2]
+PROJECT_DIRECTORY = Path(__file__).resolve().parents[3]
 ROOT_MACRO_PATH = (
-    PROJECT_DIRECTORY / "analysis" / "geometry" / "interaction_depth" / "plot_interaction_depth.C"
+    PROJECT_DIRECTORY / "analysis" / "geometry" / "theory" / "plot_interaction_depth.C"
 )
 
 
@@ -85,9 +86,8 @@ def main() -> int:
         output_root_path = run_root_plot(interaction_summary.geometry_id, arguments.root_bin)
 
         print(
-            f"{interaction_summary.geometry_id}: "
-            f"summary_json={summary_json_path} "
-            f"layers_csv={layers_csv_path} "
+            f"summary_json={summary_json_path}\n"
+            f"layers_csv={layers_csv_path}\n"
             f"interaction_depth_root={output_root_path}"
         )
 

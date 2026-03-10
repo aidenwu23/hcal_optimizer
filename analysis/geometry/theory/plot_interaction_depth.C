@@ -2,7 +2,7 @@
 Write the geometry-only interaction-depth ROOT objects for one geometry.
 
 Example:
-root -l -b -q 'analysis/geometry/interaction_depth/plot_interaction_depth.C("81c3da7d","")'
+root -l -b -q 'analysis/geometry/theory/plot_interaction_depth.C("81c3da7d","")'
 */
 
 #include <TFile.h>

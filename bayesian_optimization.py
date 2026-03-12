@@ -3,18 +3,18 @@
 """
 Example usage:
     python3 bayesian_optimization.py \
-        --rounds 2 \
+        --rounds 5 \
         --sweep-template geometries/sweeps/template_sweep.yaml \
         --lhs-sweep geometries/sweeps/sweep000.yaml \
         --lhs-variants 150 \
         --tag-prefix lhs \
-        --training-csv csv_data/cp_training_avg.csv \
+        --training-csv csv_data/1training_avg.csv \
         --model model/lgbm_surrogate.joblib \
         --bo-spec geometries/sweeps/bo_spec.yaml \
         --sweep-yaml geometries/sweeps/sweep_bo001.yaml \
         --processed-root data/processed \
         --pool 20000 \
-        --bo-variants 2 \
+        --bo-variants 5 \
         --seed 10 \
         --delete-intermediates 
 """
@@ -44,7 +44,7 @@ def main():
     ap.add_argument("--lhs-sweep", required=True, help="Output sweep YAML path")
     ap.add_argument("--lhs-variants", type=int, required=True, help="Number of LHS variants")
     ap.add_argument("--tag-prefix", default="lhs", help="Variant tag prefix")
-    ap.add_argument("--training-csv", required=True, default="csv_data/cp_training_avg.csv", help="Master CSV of all evaluated designs")
+    ap.add_argument("--training-csv", required=True, default="csv_data/1training_avg.csv", help="Master CSV of all evaluated designs")
     ap.add_argument("--model", required=True, help="Path to write surrogate model .joblib")
     ap.add_argument("--bo-spec", help="Path to bo_spec.yaml", default="geometries/sweeps/bo_spec.yaml")
     ap.add_argument("--sweep-yaml", help="Path to sweep.yaml", default="geometries/sweeps/sweep_bo001.yaml")

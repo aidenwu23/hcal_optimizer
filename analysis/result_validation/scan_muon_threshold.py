@@ -3,19 +3,21 @@
 Sweep muon thresholds for one neutron run and write a CSV.
 
 Example:
+// This is optimized geometry
 python3 analysis/result_validation/scan_muon_threshold.py \
-  --events-root data/processed/81c3da7d/run19734f434f/events.root \
+  --events-root data/processed/1144444a/runa1be6b3be8/events.root \
   --threshold-min 0.02 \
   --threshold-max 0.04 \
   --threshold-step 0.002 \
-  --out-csv data/result_validation/81c3da7d_threshold_scan.csv
+  --out-csv data/result_validation/1144444a_threshold_scan.csv
 
+// Baseline geometry
 python3 analysis/result_validation/scan_muon_threshold.py \
-  --events-root data/processed/06529cd5/runb78e64f42d/events.root \
+  --events-root data/processed/04e3fdfb/run7f378b22da/events.root \
   --threshold-min 0.02 \
   --threshold-max 0.04 \
   --threshold-step 0.002 \
-  --out-csv data/result_validation/06529cd5_threshold_scan.csv
+  --out-csv data/result_validation/04e3fdfb_threshold_scan.csv
 """
 
 from __future__ import annotations

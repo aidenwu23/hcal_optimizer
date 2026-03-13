@@ -1,5 +1,5 @@
-name: 06529cd5
-tag_prefix: 06529cd5
+name: 1144444a
+tag_prefix: 1144444a
 template: geometries/templates/hcal_template.xml
 detector_type: hcal
 index_base: 0
@@ -10,13 +10,13 @@ constants:
   dy: 100/2*cm
   zmin: 0.20*m
   nLayers: 10
-  t_spacer: 0.1*cm
+  t_spacer: 0.05*cm
   spacerMaterial: Air
   seg1_layers: 3
   seg2_layers: 3
   seg3_layers: 4
 variants:
-- tag: 06529cd5
+- tag: 1144444a
   t_absorber_seg1: 3.8869
   t_scin_seg1: 0.5639
   t_absorber_seg2: 3.9481

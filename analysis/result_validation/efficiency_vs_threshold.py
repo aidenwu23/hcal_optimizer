@@ -4,8 +4,8 @@ Plot efficiency vs muon threshold for two scan CSV files.
 
 Example:
 python3 analysis/result_validation/efficiency_vs_threshold.py \
-  --reference-csv data/result_validation/81c3da7d_threshold_scan.csv \
-  --candidate-csv data/result_validation/06529cd5_threshold_scan.csv \
+  --reference-csv data/result_validation/04e3fdfb_threshold_scan.csv \
+  --candidate-csv data/result_validation/1144444a_threshold_scan.csv \
   --out-root data/result_validation/threshold_comparison.root
 """
 
@@ -138,6 +138,7 @@ def build_scan_graph(
     scan_rows: list[ThresholdScanRow],
     line_color: int,
     root_module,
+    line_style: int = 1,
 ):
     # Draw the scan curve with asymmetric Wilson interval error bars at each threshold point.
     scan_graph = root_module.TGraphAsymmErrors(len(scan_rows))
@@ -147,6 +148,7 @@ def build_scan_graph(
     scan_graph.SetMarkerColor(line_color)
     scan_graph.SetLineWidth(2)
     scan_graph.SetMarkerStyle(20)
+    scan_graph.SetLineStyle(line_style)
     # Fill the graph with the central efficiency and the Wilson interval at each threshold.
     for row_index, row in enumerate(scan_rows):
         scan_graph.SetPoint(
@@ -209,6 +211,7 @@ def write_root_file(
         reference_rows,
         root_module.kBlue + 1,
         root_module,
+        line_style=7,
     )
     candidate_graph = build_scan_graph(
         "candidate_efficiency_vs_threshold",

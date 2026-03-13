@@ -3,18 +3,12 @@
 
 Run the HCAL production campaign from geometry sweeps through manifests.
 Example: 
-python3 conductor.py --spec geometries/sweeps/extension_1.yaml \
-  --muon-events 10000 \
-  --neutron-events 3000 \
-  --delete-intermediates \
-  --seeds 67 68 69
-
 python3 conductor.py --spec geometries/sweeps/best_geo.yaml \
   --muon-events 10000 \
   --neutron-events 3000 \
   --seeds 67
 
-python3 conductor.py --spec geometries/sweeps/bhcal.yaml \
+python3 conductor.py --spec geometries/sweeps/control.yaml \
   --muon-events 10000 \
   --neutron-events 3000 \
   --seeds 67

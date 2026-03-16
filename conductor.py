@@ -77,7 +77,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         help="Override the expected MC PDG code; defaults to gun particle lookup when available.",
     )
-    parser.add_argument("--muon-threshold", type=float, default=0.05, help="Visible-energy threshold (GeV) used when no muon control calibration overrides it.")
+    parser.add_argument(
+        "--muon-threshold",
+        type=float,
+        default=None,
+        help="Fixed visible-energy threshold in GeV. Omit to calibrate one threshold per geometry.",
+    )
     parser.add_argument("--manifest-json", default=str(DATA_DIRECTORY / "manifests" / "run_manifest.json"), help="Path for JSON run manifest.")
     parser.add_argument("--manifest-csv", default=str(DATA_DIRECTORY / "manifests" / "run_manifest.csv"), help="Path for CSV run manifest.")
     parser.add_argument("--dry-run", action="store_true", help="Print actions without executing external commands.")
@@ -138,10 +143,11 @@ def main() -> None:
     run_records: List[RunRecord] = []
     any_run_plans = False
     for geometry_variant in geometry_variants:
-        geometry_muon_threshold = float(args.muon_threshold)
+        geometry_muon_threshold = args.muon_threshold
 
-        # For non-muon campaigns, derive this geometry's threshold before any of its signal runs.
-        if not running_muon_sample:
+        # For non-muon campaigns, derive one threshold per geometry only when the caller did
+        # not provide a fixed threshold on the CLI.
+        if not running_muon_sample and geometry_muon_threshold is None:
             calibration_json_path = run_muon_calibration(args, geometry_variant)
             if not args.dry_run:
                 with calibration_json_path.open("r", encoding="utf-8") as calibration_file:
@@ -174,8 +180,9 @@ def main() -> None:
                 neutron_scale = None
                 is_neutron = run_plan.gun_particle.strip().lower() == "neutron"
 
-                # Use the threshold derived for this geometry on each of its non-muon runs.
-                if not running_muon_sample:
+                # Use either the fixed CLI threshold or the derived geometry threshold on each
+                # non-muon run.
+                if not running_muon_sample and geometry_muon_threshold is not None:
                     args.muon_threshold = geometry_muon_threshold
 
                 # Run the full chain for this plan from simulation through analysis outputs.

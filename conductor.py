@@ -7,6 +7,7 @@ python3 conductor.py --spec geometries/sweeps/bhcal.yaml \
   --muon-threshold 0.02 \
   --events 3000 \
   --gun-particle neutron kaon0L \
+  --gun-kinetic-energy 1 \
   --seeds 67 --delete-intermediates
 
 python3 conductor.py --spec geometries/sweeps/bhcal.yaml \
@@ -46,6 +47,11 @@ PROJECT_DIRECTORY = Path(__file__).resolve().parent
 
 # Parse the CLI options for one campaign run.
 def parse_args() -> argparse.Namespace:
+    raw_args = sys.argv[1:]
+    gun_energy_requested = any(token == "--gun-energy" or token.startswith("--gun-energy=") for token in raw_args)
+    gun_kinetic_energy_requested = any(
+        token == "--gun-kinetic-energy" or token.startswith("--gun-kinetic-energy=") for token in raw_args
+    )
     parser = argparse.ArgumentParser(description="Orchestrate HCAL production runs.")
     parser.add_argument("--spec", "-s", nargs="+", required=True, help="Sweep spec(s) to materialise (YAML).")
     parser.add_argument("--skip-sweep", action="store_true", help="Assume geometries already generated; skip sweep_geometries.py.")
@@ -67,7 +73,14 @@ def parse_args() -> argparse.Namespace:
         default=["neutron"],
         help="Signal gun particle name(s).",
     )
-    parser.add_argument("--gun-energy", type=float, nargs="+", default=[5.0], help="Gun energies in GeV (default: 5).")
+    parser.add_argument("--gun-energy", type=float, nargs="+", default=None, help="Total gun energies in GeV passed to ddsim.")
+    parser.add_argument(
+        "--gun-kinetic-energy",
+        type=float,
+        nargs="+",
+        default=None,
+        help="Gun kinetic energies in GeV. Converted to total energy before calling ddsim.",
+    )
     parser.add_argument("--gun-position", default="0 0 0", help="Gun position string passed to ddsim.")
     parser.add_argument("--gun-direction", default="0 0 -1", help="Gun direction string passed to ddsim.")
     parser.add_argument("--events", type=int, default=1, help="Number of signal events per ddsim run.")
@@ -99,7 +112,13 @@ def parse_args() -> argparse.Namespace:
         help="Delete intermediate ROOT files after downstream steps finish successfully.",
     )
     parser.add_argument("--python", default=sys.executable, help="Python interpreter for helper scripts.")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if gun_energy_requested and gun_kinetic_energy_requested:
+        print("WARNING: --gun-energy and --gun-kinetic-energy cannot be used together.", file=sys.stderr)
+        parser.error("choose only one of --gun-energy or --gun-kinetic-energy.")
+    if args.gun_energy is None and args.gun_kinetic_energy is None:
+        args.gun_energy = [5.0]
+    return args
 
 
 # Resolve a CLI path against the project root.

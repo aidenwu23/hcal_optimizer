@@ -141,7 +141,6 @@ void performance(const char* events_path_cstr, const char* meta_path_cstr = "",
       calibration_json.contains("response_scale") && calibration_json["response_scale"].is_number();
   const double response_scale =
       has_response_scale ? calibration_json["response_scale"].get<double>() : 0.0;
-  const double mc_rel_diff_limit = 0.1;  // Keep the 10% MC-energy consistency window.
   const double wilson_z = 1.0;  // Use a 1-sigma Wilson interval for the efficiency error.
   if (muon_threshold_GeV < 0.0 || !std::isfinite(muon_threshold_GeV)) {
     std::cerr << "[performance] muon_threshold_GeV must be finite and non-negative.\n";
@@ -186,7 +185,7 @@ void performance(const char* events_path_cstr, const char* meta_path_cstr = "",
 
   PerformanceStats stats;
   const Long64_t entry_count = tree->GetEntries();
-  // Keep only the selected beam sample, then accumulate detection and energy statistics.
+  // Accumulate detection and energy statistics over the processed run.
   for (Long64_t entry_index = 0; entry_index < entry_count; ++entry_index) {
     tree->GetEntry(entry_index);
 
@@ -198,11 +197,6 @@ void performance(const char* events_path_cstr, const char* meta_path_cstr = "",
 
     const double mc_energy_GeV = static_cast<double>(mc_E);
     if (mc_energy_GeV <= 0.0 || gun_energy_GeV <= 0.0) {
-      continue;
-    }
-
-    const double relative_difference = std::abs(mc_energy_GeV - gun_energy_GeV) / gun_energy_GeV;
-    if (relative_difference > mc_rel_diff_limit) {
       continue;
     }
 

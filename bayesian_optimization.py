@@ -91,19 +91,16 @@ def main():
             "--out", args.training_csv
         ])
 
-    for r in range(args.rounds):
-        print(f"\n=== BO round {r:03d} ===")
-
-
-        # 1. Train surrogate on current master dataset
         run_cmd([
             "python3", "surrogate/train_surrogate.py",
             "--training-csv", args.training_csv,
             "--output-model", args.model
         ])
+
+    for r in range(args.rounds):
+        print(f"\n=== BO round {r:03d} ===")
         
-        # 2. Propose next batch
-        #sweep_yaml = args.workdir / f"sweep_bo001.yaml" 
+        # 1. Propose next batch
         run_cmd([
             "python3", "surrogate/propose_bo.py",
             "--model", args.model,
@@ -114,7 +111,7 @@ def main():
             "--seed", str(args.seed + r),
         ])
 
-        # 3. Run the sweep / simulations
+        # 2. Run the sweep / simulations
         run_cmd([
             "python3", "conductor.py",
             "--spec", args.sweep_yaml,
@@ -124,11 +121,18 @@ def main():
             "--overwrite"
         ])
 
-        # 4. Collect this round's results into CSV
+        # 3. Collect this round's results into CSV
         run_cmd([
             "python3", "surrogate/aggregator.py",
             "--processed-root", args.processed_root,
             "--out", args.training_csv
+        ])
+
+        # 4. Train surrogate on current master dataset
+        run_cmd([
+            "python3", "surrogate/train_surrogate.py",
+            "--training-csv", args.training_csv,
+            "--output-model", args.model
         ])
 
     #make script that will select the best geoometry parameters and performance 

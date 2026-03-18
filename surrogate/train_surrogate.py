@@ -9,8 +9,6 @@ to neutron performance metrics at fixed muon false-positive rate.
 
 Targets:
   - detection_efficiency
-  - eff_lo
-  - eff_hi
   - energy_resolution
 
 Usage: 
@@ -36,6 +34,7 @@ import numpy as np
 from lightgbm import LGBMRegressor
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_percentage_error
 
 
 # -------------------------
@@ -57,8 +56,6 @@ FEATURE_COLUMNS = [
 
 TARGET_COLUMNS = [
     "detection_efficiency",
-    "eff_lo",
-    "eff_hi",
     "energy_resolution",
 ]
 
@@ -222,16 +219,22 @@ def main():
     val_pred = model.predict(X_val)
     val_pred = pd.DataFrame(val_pred, columns=TARGET_COLUMNS)
 
-    print("\nValidation summary (mean absolute error):")
-    for col in TARGET_COLUMNS:
-        mae = np.mean(np.abs(val_pred[col] - y_val[col].values))
-        print(f"  {col:20s}: MAE = {mae:.5f}")
+    #print("\nValidation summary (mean absolute error):")
+    #for col in TARGET_COLUMNS:
+    #    mae = np.mean(np.abs(val_pred[col] - y_val[col].values))
+    #    print(f"  {col:20s}: MAE = {mae:.5f}")
 
     #print("\nValidation summary (weighted mean absolute error):")
     #for col in TARGET_COLUMNS:
     #    err = np.abs(val_pred[col].values - y_val[col].values)
     #    wmae = np.sum(err * w_val) / np.sum(w_val)
     #    print(f" {col:20s}: wMAE = {wmae:.5f}")
+
+    print("\nValidation summary (mean absolute percentage error):")
+    for col in TARGET_COLUMNS:
+        mape_normalized = mean_absolute_percentage_error(val_pred[col], y_val[col].values)
+        mape_percentage = mape_normalized * 100
+        print(f"  {col:20s}: MAE = {mape_percentage:.2f}")
 
     # -------------------------
     # Save trained model

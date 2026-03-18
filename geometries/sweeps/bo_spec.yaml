@@ -44,7 +44,6 @@ constraints:
   # Constraints on surrogate outputs
   predicted:
     - "energy_resolution <= 0.50"
-    - "eff_lo >= 0.00"
 
 scoring:
   mode: "metric"   # metric | tradeoff
@@ -53,7 +52,7 @@ scoring:
 
   # Example if you want a tradeoff instead:
   # mode: "tradeoff"
-  # expr: "eff_lo - 2.0*energy_resolution"
+  # expr: "detection_efficiency - 2.0*energy_resolution"
   # maximize: true
 
 diversity:

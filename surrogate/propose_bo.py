@@ -65,8 +65,6 @@ SURROGATE_FEATURES = [
 
 SURROGATE_TARGETS = [
     "detection_efficiency",
-    "eff_lo",
-    "eff_hi",
     "energy_resolution",
 ]
 

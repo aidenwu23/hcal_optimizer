@@ -1,19 +1,19 @@
 # aggregator.py
-# Scans hcal_generator/data/processed/<geomID>/<runID> for (meta.json, calibration.json, performance.json),
-# joins geometry parameters from hcal_generator/geometries/generated/<geomID>/geometry.json,
+# Scans hcal_optimizer/data/processed/<geomID>/<runID> for (meta.json, calibration.json, performance.json),
+# joins geometry parameters from hcal_optimizer/geometries/generated/<geomID>/geometry.json,
 # and emits a run-level training table (CSV) in the specified directory.
 #
 # Usage:
 #   python3 surrogate/aggregator.py --processed-root data/processed --out csv_data/training.csv
 #
-# Output columns: geometry_id, run_id, nLayers, seg1_layers, seg2_layers, seg3_layers,
+# Output columns: geometry_id, run_id, gun_particle, nLayers, seg1_layers, seg2_layers, seg3_layers,
 #   t_absorber_seg1/2/3, t_scin_seg1/2/3, t_spacer,
 #   gun_energy_GeV, muon_threshold_GeV,
 #   detection_efficiency, eff_lo, eff_hi, energy_resolution
 """
 python3 surrogate/aggregator.py \
   --processed-root data/processed \
-  --out surrogate/csv_data/training.csv
+  --out surrogate/csv_data/extra.csv
 """
 
 import argparse, json
@@ -40,6 +40,7 @@ def _extract(meta_p: Path, calibration_p: Path, perf_p: Path, geometry_root: Pat
     return {
         "geometry_id":          geometry_id,
         "run_id":               meta_p.parent.name,
+        "gun_particle":         meta.get("gun_particle"),
         # Geometry features
         "nLayers":              geom_params.get("nLayers"),
         "seg1_layers":          geom_params.get("seg1_layers"),
@@ -76,8 +77,8 @@ def _pairs(processed_root: Path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--processed-root", required=True, help="Path to hcal_generator/data/processed")
-    ap.add_argument("--geometry-root", default=None, help="Path to hcal_generator/geometries/generated (inferred if omitted)")
+    ap.add_argument("--processed-root", required=True, help="Path to hcal_optimizer/data/processed")
+    ap.add_argument("--geometry-root", default=None, help="Path to hcal_optimizer/geometries/generated (inferred if omitted)")
     ap.add_argument("--out", default="training.csv", help="Output CSV filename")
     args = ap.parse_args()
 
@@ -101,7 +102,7 @@ def main():
     df[thickness_cols] = df[thickness_cols].apply(lambda s: pd.to_numeric(s.astype(str).str.replace("*cm", "", regex=False).str.strip(), errors="coerce"))
     
     preferred = [
-        "geometry_id", "run_id",
+        "geometry_id", "run_id", "gun_particle",
         "nLayers",
         "seg1_layers", "seg2_layers", "seg3_layers",
         "t_absorber_seg1", "t_absorber_seg2", "t_absorber_seg3",

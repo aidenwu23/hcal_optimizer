@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Average a run-level surrogate training CSV into one row per geometry.
+Average a run-level surrogate training CSV into one row per geometry/particle/energy point.
 Example:
 python3 surrogate/average_training_csv.py \
   --in surrogate/csv_data/training.csv \
@@ -16,6 +16,7 @@ from collections import defaultdict
 from pathlib import Path
 
 FEATURE_COLUMNS = [
+    "gun_particle",
     "nLayers",
     "seg1_layers",
     "seg2_layers",
@@ -31,6 +32,13 @@ FEATURE_COLUMNS = [
     "muon_threshold_GeV",
 ]
 
+GROUP_BY_COLUMNS = [
+    "geometry_id",
+    "gun_particle",
+    "gun_energy_GeV",
+    "muon_threshold_GeV",
+]
+
 AVERAGE_COLUMNS = [
     "detection_efficiency",
     "eff_lo",
@@ -41,7 +49,7 @@ AVERAGE_COLUMNS = [
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Average a run-level surrogate training CSV by geometry_id."
+        description="Average a run-level surrogate training CSV by geometry, particle, energy, and threshold."
     )
     parser.add_argument(
         "--in",
@@ -82,7 +90,7 @@ def sample_std(values: list[float]) -> float | None:
 
 
 def main() -> int:
-    # Read the run-level rows, group them by geometry, then write one averaged row per geometry.
+    # Read the run-level rows, group them by geometry/particle/energy/threshold, then write one averaged row per point.
     arguments = parse_arguments()
     input_path = Path(arguments.input_csv).expanduser().resolve()
     output_path = Path(arguments.out).expanduser().resolve()
@@ -94,24 +102,25 @@ def main() -> int:
         reader = csv.DictReader(input_file)
         if reader.fieldnames is None:
             raise ValueError(f"{input_path} does not contain a CSV header.")
-        if "geometry_id" not in reader.fieldnames:
-            raise ValueError(f"{input_path} is missing required column: geometry_id")
+        missing_group_columns = [column_name for column_name in GROUP_BY_COLUMNS if column_name not in reader.fieldnames]
+        if missing_group_columns:
+            raise ValueError(f"{input_path} is missing required columns: {missing_group_columns}")
 
-        rows_by_geometry: dict[str, list[dict[str, str]]] = defaultdict(list)
+        rows_by_group: dict[tuple[str, ...], list[dict[str, str]]] = defaultdict(list)
         for row in reader:
-            geometry_id = row.get("geometry_id", "").strip()
-            if not geometry_id:
+            group_key = tuple(row.get(column_name, "").strip() for column_name in GROUP_BY_COLUMNS)
+            if not group_key[0]:
                 raise ValueError("Encountered a row with an empty geometry_id.")
-            rows_by_geometry[geometry_id].append(row)
+            rows_by_group[group_key].append(row)
 
     output_rows: list[dict[str, object]] = []
-    # Collapse all runs for one geometry into one averaged training row.
-    for geometry_id in sorted(rows_by_geometry):
-        geometry_rows = rows_by_geometry[geometry_id]
+    # Collapse all runs for one geometry/particle/energy/threshold point into one averaged training row.
+    for group_key in sorted(rows_by_group):
+        geometry_rows = rows_by_group[group_key]
         first_row = geometry_rows[0]
 
         output_row: dict[str, object] = {
-            "geometry_id": geometry_id,
+            "geometry_id": group_key[0],
             "n_runs": len(geometry_rows),
         }
 

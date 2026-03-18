@@ -73,13 +73,6 @@ command -v spack >/dev/null 2>&1 || _die "Spack not found after sourcing: $SPACK
 
 # ---------------- show environments ----------------
 echo "Spack: $(spack --version)"
-echo
-echo "Available environments:"
-spack env list || true
-echo
-echo "Active environment (if any):"
-spack env status || true
-
 # ---------------- activate one environment ----------------
 SPACK_ENVIRONMENT_NAME="${1:-${SPACK_ENVIRONMENT_NAME:-det-env}}"
 ACTIVATION_MODE="view"

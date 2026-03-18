@@ -16,7 +16,6 @@ CALIBRATION_MACRO_PATH = PROJECT_DIRECTORY / "simulation" / "calibration" / "cal
 DEFAULT_GUN_DIRECTION = "0 0 -1"
 DEFAULT_GUN_POSITION = "0 0 0"
 
-
 def run_command(command: List[str], label: str) -> None:
     quoted = " ".join(shlex.quote(token) for token in command)
     print(f"[{label}] {quoted}")

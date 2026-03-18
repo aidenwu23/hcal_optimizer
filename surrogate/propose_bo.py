@@ -4,7 +4,7 @@ propose_bo.py
 
 Reads a BO spec (bounds/constraints + sweep_base), samples candidate geometries,
 scores them using a trained LightGBM surrogate (point predictions), and writes
-a sweep YAML compatible with hcal_generator/geometries/sweep_geometries.py.
+a sweep YAML compatible with hcal_optimizer/geometries/sweep_geometries.py.
 
 - Geometry knobs may be split between:
     * bounds        -> optimized/proposed variables
@@ -16,7 +16,7 @@ a sweep YAML compatible with hcal_generator/geometries/sweep_geometries.py.
     t_absorber_seg1/2/3, t_scin_seg1/2/3
   
 - Variants written to YAML contain ONLY valid geometry keys (no extra bookkeeping keys),
-  so hcal_generator/geometries/generate_hcal.py won’t see unknown --set parameters.
+  so hcal_optimizer/geometries/generate_hcal.py won’t see unknown --set parameters.
 
 Example:
   python3 surrogate/propose_bo.py \
@@ -302,8 +302,8 @@ def build_sweep_yaml(sweep_base: Dict[str, Any], X_geom: np.ndarray, geom_var_na
 def main() -> None:
     ap = argparse.ArgumentParser(description="Propose next geometries (Option A) and write a sweep YAML.")
     ap.add_argument("--model", required=True, help="Path to trained surrogate .joblib (MultiOutputRegressor LGBM).")
-    ap.add_argument("--spec", required=True, help="Path to bo_spec.yaml (e.g. ../hcal_generator/geometries/sweeps/bo_spec.yaml).")
-    ap.add_argument("--out", required=True, help="Output sweep YAML path (e.g. ../hcal_generator/geometries/sweeps/sweep_bo001.yaml).")
+    ap.add_argument("--spec", required=True, help="Path to bo_spec.yaml (e.g. ../hcal_optimizer/geometries/sweeps/bo_spec.yaml).")
+    ap.add_argument("--out", required=True, help="Output sweep YAML path (e.g. ../hcal_optimizer/geometries/sweeps/sweep_bo001.yaml).")
     ap.add_argument("--pool", type=int, default=20000, help="Number of random/Sobol candidates to sample.")
     ap.add_argument("--k", type=int, default=32, help="Number of variants to output.")
     ap.add_argument("--seed", type=int, default=0)

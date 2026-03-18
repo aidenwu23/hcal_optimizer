@@ -209,6 +209,7 @@ def write_metadata(
     """Write meta.json directly from conductor-owned run descriptors."""
     payload: Dict[str, Any] = {
         "geometry_id": run_plan.geometry_variant.geometry_id,
+        "gun_particle": run_plan.gun_particle,
         "gun_energy_GeV": run_plan.gun_energy_GeV,
         "seed": run_plan.seed,
     }
@@ -229,16 +230,16 @@ def write_metadata(
 def write_calibration(
     args: argparse.Namespace,
     run_plan: RunPlan,
-    neutron_scale: Optional[float] = None,
+    response_scale: Optional[float] = None,
 ) -> None:
     """Write calibration.json with the run-level calibration constants."""
     payload: Dict[str, Any] = {
         "muon_threshold_GeV": args.muon_threshold,
     }
 
-    # Add the neutron response scale only for runs where that calibration was actually derived.
-    if neutron_scale is not None:
-        payload["neutron_scale"] = neutron_scale
+    # Add the particle response scale only for runs where that calibration was actually derived.
+    if response_scale is not None:
+        payload["response_scale"] = response_scale
     if args.dry_run:
         print(f"[calibration] write {run_plan.calibration_path}")
         return
@@ -248,15 +249,15 @@ def write_calibration(
     print(f"[calibration] wrote {run_plan.calibration_path}")
 
 
-# Derive the neutron visible-to-truth response scale from the processed events tree for one run.
-def run_neutron_calibration(
+# Derive the particle visible-to-truth response scale from the processed events tree for one run.
+def run_particle_response_calibration(
     args: argparse.Namespace,
     run_plan: RunPlan,
 ) -> Tuple[float, Optional[float]]:
-    """Derive one neutron visible-to-truth scale from the processed events tree."""
+    """Derive one visible-to-truth response scale from the processed events tree."""
     calibration_path = run_plan.calibration_path
     ensure_dir(calibration_path.parent)
-    macro_path = SIMULATION_DIRECTORY / "calibration" / "calibrate_neutron_response.C"
+    macro_path = SIMULATION_DIRECTORY / "calibration" / "calibrate_particle_response.C"
 
     # Hand the processed events tree, beam energy, and detect threshold to the ROOT calibration macro.
     command = [
@@ -267,20 +268,20 @@ def run_neutron_calibration(
         f'{macro_path}("{run_plan.events_path}",{run_plan.gun_energy_GeV:.12g},{args.muon_threshold:.12g},"{calibration_path}")',
     ]
     start = time.time()
-    run_cmd(command, dry_run=args.dry_run, label="neutron_calibration")
+    run_cmd(command, dry_run=args.dry_run, label="particle_response_calibration")
     elapsed = time.time() - start
     if args.dry_run:
         return elapsed, None
 
-    # Read back the neutron_scale so conductor can write it into the run-level calibration file.
+    # Read back the response_scale so conductor can write it into the run-level calibration file.
     if not calibration_path.exists():
-        raise FileNotFoundError(f"Missing neutron calibration output: {calibration_path}")
+        raise FileNotFoundError(f"Missing particle response calibration output: {calibration_path}")
     with calibration_path.open("r", encoding="utf-8") as calibration_file:
         payload = json.load(calibration_file)
-    neutron_scale = payload.get("neutron_scale")
-    if neutron_scale is None:
-        raise ValueError(f"neutron_scale missing in {calibration_path}")
-    return elapsed, float(neutron_scale)
+    response_scale = payload.get("response_scale")
+    if response_scale is None:
+        raise ValueError(f"response_scale missing in {calibration_path}")
+    return elapsed, float(response_scale)
 
 
 # Run the fixed ROOT performance macro on one processed sample.

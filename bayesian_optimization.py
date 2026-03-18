@@ -48,7 +48,7 @@ def main():
     ap.add_argument("--model", required=True, help="Path to write surrogate model .joblib")
     ap.add_argument("--bo-spec", help="Path to bo_spec.yaml", default="geometries/sweeps/bo_spec.yaml")
     ap.add_argument("--sweep-yaml", help="Path to sweep.yaml", default="geometries/sweeps/sweep_bo001.yaml")
-    ap.add_argument("--processed-root", help="Path to hcal_generator/data/processed")
+    ap.add_argument("--processed-root", help="Path to hcal_optimizer/data/processed")
     #ap.add_argument("--workdir", help="Directory for per-round YAMLs / CSVs", default="bo_workdir")
     ap.add_argument("--pool", type=int, default=20000, help="Number of random/Sobol candidates to sample.")
     ap.add_argument("--bo-variants", type=int, default=5, help="Number of BO variants to output.")
@@ -79,7 +79,7 @@ def main():
         run_cmd([
             "python3", "conductor.py",
             "--spec", args.lhs_sweep,
-            "--neutron-events", "2000",
+            "--events", "2000",
             "--seeds", args.seed,
             "--delete-intermediates",
             "--overwrite"
@@ -118,7 +118,7 @@ def main():
         run_cmd([
             "python3", "conductor.py",
             "--spec", args.sweep_yaml,
-            "--neutron-events", "2000",
+            "--events", "2000",
             "--seeds", str(args.seed + r),
             "--delete-intermediates",
             "--overwrite"

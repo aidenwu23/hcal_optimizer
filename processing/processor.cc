@@ -5,6 +5,7 @@
 #include <cmath>
 #include <algorithm>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <string>
 
@@ -34,6 +35,33 @@ static double energy_from_mc(const edm4hep::MCParticle& p) {
   const double p2 = q.x*q.x + q.y*q.y + q.z*q.z;
   const double m  = p.getMass();
   return std::sqrt(std::max(0.0, p2 + m*m));
+}
+
+static bool has_no_parents(const edm4hep::MCParticle& p) {
+  const auto parents = p.getParents();
+  return parents.begin() == parents.end();
+}
+
+static double vertex_radius2_from_mc(const edm4hep::MCParticle& p) {
+  const auto& vertex = p.getVertex();
+  return vertex.x * vertex.x + vertex.y * vertex.y + vertex.z * vertex.z;
+}
+
+static int mc_selection_priority(const edm4hep::MCParticle& p, int expectedPDG) {
+  const bool not_from_sim = !p.isCreatedInSimulation();
+  const bool no_parents = has_no_parents(p);
+  const bool matches_expected_pdg =
+      expectedPDG != 0 && p.getPDG() != 0 && std::abs(p.getPDG()) == std::abs(expectedPDG);
+
+  if (expectedPDG != 0) {
+    if (matches_expected_pdg && not_from_sim && no_parents) return 0;
+    if (matches_expected_pdg && not_from_sim) return 1;
+    if (matches_expected_pdg) return 2;
+  }
+  if (not_from_sim && no_parents) return 3;
+  if (not_from_sim) return 4;
+  if (no_parents) return 5;
+  return 6;
 }
 
 int main(int argc, char** argv) {
@@ -105,53 +133,42 @@ int main(int argc, char** argv) {
     if (mcCollection) {
       if (debug && nEvents==1) std::cerr << "[process] Using MC collection: MCParticles (size=" << mcCollection->size() << ")\n";
       
-      // Prefer the requested PDG, then prefer particles not created in simulation.
-      std::optional<edm4hep::MCParticle> same_pdg_not_from_sim_candidate;
-      std::optional<edm4hep::MCParticle> same_pdg_candidate;
-      std::optional<edm4hep::MCParticle> not_from_sim_candidate;
-      std::optional<edm4hep::MCParticle> highest_energy_candidate;
-      double same_pdg_not_from_sim_candidate_energy = -1.0;
-      double same_pdg_candidate_energy = -1.0;
-      double not_from_sim_candidate_energy = -1.0;
-      double highest_energy_candidate_energy = -1.0;
+      // Prefer the injected beam particle over later shower products.
+      std::optional<edm4hep::MCParticle> selected_candidate;
+      int best_priority = std::numeric_limits<int>::max();
+      double best_abs_time = std::numeric_limits<double>::infinity();
+      double best_vertex_radius2 = std::numeric_limits<double>::infinity();
+      double best_energy = -1.0;
 
       for (const auto& p : *mcCollection) {
-        // Cache the particle energy once because every comparison uses it.
         const double energy = energy_from_mc(p);
-        const bool not_from_sim = !p.isCreatedInSimulation();
-        const int pdg = p.getPDG();
+        const int priority = mc_selection_priority(p, expectedPDG);
+        const double abs_time = std::abs(static_cast<double>(p.getTime()));
+        const double vertex_radius2 = vertex_radius2_from_mc(p);
 
-        // Among particles not created in simulation, keep the highest-energy candidate.
-        if (not_from_sim && energy > not_from_sim_candidate_energy) {
-          not_from_sim_candidate = p;
-          not_from_sim_candidate_energy = energy;
-        }
-        // Keep the highest-energy particle in the full MC collection.
-        if (energy > highest_energy_candidate_energy) {
-          highest_energy_candidate = p;
-          highest_energy_candidate_energy = energy;
+        bool better_candidate = false;
+        if (!selected_candidate || priority < best_priority) {
+          better_candidate = true;
+        } else if (priority == best_priority) {
+          if (abs_time < best_abs_time) {
+            better_candidate = true;
+          } else if (abs_time == best_abs_time) {
+            if (vertex_radius2 < best_vertex_radius2) {
+              better_candidate = true;
+            } else if (vertex_radius2 == best_vertex_radius2 && energy > best_energy) {
+              better_candidate = true;
+            }
+          }
         }
 
-        // Keep the best candidates whose PDG matches the requested particle type.
-        if (expectedPDG != 0 && pdg != 0 && std::abs(pdg) == std::abs(expectedPDG)) {
-          // Prefer matching particles that were not created in simulation.
-          if (not_from_sim && energy > same_pdg_not_from_sim_candidate_energy) {
-            same_pdg_not_from_sim_candidate = p;
-            same_pdg_not_from_sim_candidate_energy = energy;
-          }
-          // Otherwise keep the highest-energy matching particle.
-          if (energy > same_pdg_candidate_energy) {
-            same_pdg_candidate = p;
-            same_pdg_candidate_energy = energy;
-          }
+        if (better_candidate) {
+          selected_candidate = p;
+          best_priority = priority;
+          best_abs_time = abs_time;
+          best_vertex_radius2 = vertex_radius2;
+          best_energy = energy;
         }
       }
-
-      std::optional<edm4hep::MCParticle> selected_candidate;
-      if (same_pdg_not_from_sim_candidate) selected_candidate = same_pdg_not_from_sim_candidate;
-      else if (same_pdg_candidate) selected_candidate = same_pdg_candidate;
-      else if (not_from_sim_candidate) selected_candidate = not_from_sim_candidate;
-      else if (highest_energy_candidate) selected_candidate = highest_energy_candidate;
 
       if (selected_candidate) {
         // Keep only the energy of the selected truth candidate.

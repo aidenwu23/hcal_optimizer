@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
 """
-Sweep muon thresholds for one neutron run and write a two-column CSV.
+Sweep muon thresholds for one processed signal run and write a CSV.
 
 Example:
+// This is optimized geometry
 python3 analysis/result_validation/scan_muon_threshold.py \
-  --events-root data/processed/81c3da7d/run19734f434f/events.root \
+  --events-root data/processed/1144444a/runa1be6b3be8/events.root \
   --threshold-min 0.02 \
   --threshold-max 0.04 \
   --threshold-step 0.002 \
-  --out-csv data/result_validation/81c3da7d_threshold_scan.csv
+  --out-csv data/result_validation/1144444a_threshold_scan.csv
 
+// Baseline geometry
 python3 analysis/result_validation/scan_muon_threshold.py \
-  --events-root data/processed/06529cd5/runb78e64f42d/events.root \
+  --events-root data/processed/04e3fdfb/run7f378b22da/events.root \
   --threshold-min 0.02 \
   --threshold-max 0.04 \
   --threshold-step 0.002 \
-  --out-csv data/result_validation/06529cd5_threshold_scan.csv
+  --out-csv data/result_validation/04e3fdfb_threshold_scan.csv
 """
 
 from __future__ import annotations
@@ -35,9 +37,8 @@ if str(PROJECT_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIRECTORY))
 
 from simulation.helpers.geometry_index import GeometryVariant
-from simulation.helpers.run_plan import lookup_pdg
 from simulation.helpers.run_steps import (
-    run_neutron_calibration,
+    run_particle_response_calibration,
     run_performance_analysis,
     write_calibration,
 )
@@ -56,18 +57,24 @@ class ValidationRun:
     geometry_variant: GeometryVariant
     gun_energy_GeV: float
     run_id: str
-    raw_path: Path
     events_path: Path
     meta_path: Path
     calibration_path: Path
     performance_path: Path
-    seed: object
+
+
+@dataclass
+class EfficiencyScanRow:
+    muon_threshold_GeV: float
+    detection_efficiency: float
+    eff_lo: float
+    eff_hi: float
 
 
 def parse_arguments() -> argparse.Namespace:
     # Read one processed run input, the threshold scan, and the CSV output path.
     parser = argparse.ArgumentParser(
-        description="Sweep muon thresholds for one processed neutron run and write a CSV."
+        description="Sweep muon thresholds for one processed signal run and write a CSV."
     )
     parser.add_argument(
         "--events-root",
@@ -122,6 +129,7 @@ def build_threshold_list(arguments: argparse.Namespace) -> List[float]:
     # Build the scan points explicitly so the CSV keeps one stable threshold row per step.
     threshold_values: List[float] = []
     point_count = int(round((threshold_max - threshold_min) / threshold_step))
+    # Walk the threshold range one fixed step at a time.
     for point_index in range(point_count + 1):
         threshold_value = threshold_min + point_index * threshold_step
         if threshold_value > threshold_max + 1e-12:
@@ -201,19 +209,14 @@ def load_processed_run_plan(events_root_path: Path) -> ValidationRun:
 
     geometry_variant = load_geometry_variant(geometry_id)
     run_id = processed_directory.name
-    raw_path = (
-        PROJECT_DIRECTORY / "data" / "raw" / geometry_variant.geometry_id / f"{run_id}.edm4hep.root"
-    )
     return ValidationRun(
         geometry_variant=geometry_variant,
         gun_energy_GeV=float(gun_energy_GeV),
         run_id=run_id,
-        raw_path=raw_path,
         events_path=events_root_path,
         meta_path=meta_path,
         calibration_path=processed_directory / "calibration.json",
         performance_path=processed_directory / "performance.json",
-        seed=meta_payload.get("seed"),
     )
 
 
@@ -221,6 +224,7 @@ def build_threshold_run_plan(
     processed_run_plan: ValidationRun,
     threshold_GeV: float,
 ) -> ValidationRun:
+    # Keep threshold-specific calibration and performance outputs separate by threshold value.
     threshold_label = f"{threshold_GeV:.12g}".replace("-", "m").replace(".", "p")
     validation_directory = (
         VALIDATION_ROOT_DIRECTORY
@@ -232,12 +236,10 @@ def build_threshold_run_plan(
         geometry_variant=processed_run_plan.geometry_variant,
         gun_energy_GeV=processed_run_plan.gun_energy_GeV,
         run_id=processed_run_plan.run_id,
-        raw_path=processed_run_plan.raw_path,
         events_path=processed_run_plan.events_path,
         meta_path=processed_run_plan.meta_path,
         calibration_path=validation_directory / "calibration.json",
         performance_path=validation_directory / "performance.json",
-        seed=processed_run_plan.seed,
     )
 
 
@@ -250,44 +252,65 @@ def build_runtime_args(arguments: argparse.Namespace, muon_threshold_GeV: float)
     )
 
 
-def load_detection_efficiency(performance_path: Path) -> float:
+def load_efficiency_row(
+    performance_path: Path,
+    muon_threshold_GeV: float,
+) -> EfficiencyScanRow:
+    # Read the central efficiency value and the Wilson interval from one performance summary.
     with performance_path.open("r", encoding="utf-8") as performance_file:
         payload = json.load(performance_file)
+
     detection_efficiency = payload.get("detection_efficiency")
-    if detection_efficiency is None:
-        raise ValueError(f"detection_efficiency missing in {performance_path}")
-    return float(detection_efficiency)
+    eff_lo = payload.get("eff_lo")
+    eff_hi = payload.get("eff_hi")
+    if detection_efficiency is None or eff_lo is None or eff_hi is None:
+        raise ValueError(
+            f"detection_efficiency, eff_lo, or eff_hi missing in {performance_path}"
+        )
+    return EfficiencyScanRow(
+        muon_threshold_GeV=muon_threshold_GeV,
+        detection_efficiency=float(detection_efficiency),
+        eff_lo=float(eff_lo),
+        eff_hi=float(eff_hi),
+    )
 
 
 def sweep_thresholds(
     arguments: argparse.Namespace,
     processed_run_plan: ValidationRun,
     threshold_values: Iterable[float],
-) -> List[tuple[float, float]]:
+) -> List[EfficiencyScanRow]:
     # Reuse the same processed events file for every threshold point in the scan.
-    rows: List[tuple[float, float]] = []
+    rows: List[EfficiencyScanRow] = []
     for threshold_GeV in threshold_values:
         threshold_run_plan = build_threshold_run_plan(processed_run_plan, threshold_GeV)
         runtime_args = build_runtime_args(arguments, muon_threshold_GeV=threshold_GeV)
 
         # Recompute the threshold-specific calibration and performance on the same events.root.
         if arguments.overwrite_validation or not threshold_run_plan.performance_path.exists():
-            _, neutron_scale = run_neutron_calibration(runtime_args, threshold_run_plan)
-            write_calibration(runtime_args, threshold_run_plan, neutron_scale)
+            _, response_scale = run_particle_response_calibration(runtime_args, threshold_run_plan)
+            write_calibration(runtime_args, threshold_run_plan, response_scale)
             run_performance_analysis(runtime_args, threshold_run_plan)
 
-        detection_efficiency = load_detection_efficiency(threshold_run_plan.performance_path)
-        rows.append((threshold_GeV, detection_efficiency))
+        rows.append(load_efficiency_row(threshold_run_plan.performance_path, threshold_GeV))
     return rows
 
 
-def write_csv(output_csv_path: Path, rows: Iterable[tuple[float, float]]) -> None:
+def write_csv(output_csv_path: Path, rows: Iterable[EfficiencyScanRow]) -> None:
+    # Write one CSV row per threshold point in the scan.
     output_csv_path.parent.mkdir(parents=True, exist_ok=True)
     with output_csv_path.open("w", encoding="utf-8", newline="") as output_file:
         writer = csv.writer(output_file)
-        writer.writerow(["muon_threshold_GeV", "detection_efficiency"])
-        for muon_threshold_GeV, detection_efficiency in rows:
-            writer.writerow([f"{muon_threshold_GeV:.12g}", f"{detection_efficiency:.12g}"])
+        writer.writerow(["muon_threshold_GeV", "detection_efficiency", "eff_lo", "eff_hi"])
+        for row in rows:
+            writer.writerow(
+                [
+                    f"{row.muon_threshold_GeV:.12g}",
+                    f"{row.detection_efficiency:.12g}",
+                    f"{row.eff_lo:.12g}",
+                    f"{row.eff_hi:.12g}",
+                ]
+            )
 
 
 def main() -> int:

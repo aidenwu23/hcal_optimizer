@@ -334,7 +334,7 @@ def build_tracks(particles):
 
 
 def build_polylines(particles):
-    # Build plain 3D lines so JSROOT can draw the MC segments reliably.
+    # Build plain 3D lines.
     polylines = []
 
     for particle in particles:
@@ -351,7 +351,7 @@ def build_polylines(particles):
 
 
 def build_geometry_root(xml_path, output_file):
-    # Run geoConverter to materialize the compact XML as a ROOT geometry file.
+    # Run geoConverter.
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
     command = [
@@ -460,7 +460,6 @@ def write_geometry_with_tracks(output_file, tracks, polylines):
 
         geometry.Write(GEOMETRY_KEY, ROOT.TObject.kOverwrite)
 
-        # Keep both canvases in local scope until the file update is complete.
         full_canvas = ROOT.TCanvas(
             FULL_DISPLAY_NAME,
             FULL_DISPLAY_NAME,

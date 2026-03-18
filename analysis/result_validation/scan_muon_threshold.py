@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Sweep muon thresholds for one neutron run and write a CSV.
+Sweep muon thresholds for one processed signal run and write a CSV.
 
 Example:
 // This is optimized geometry
@@ -38,7 +38,7 @@ if str(PROJECT_DIRECTORY) not in sys.path:
 
 from simulation.helpers.geometry_index import GeometryVariant
 from simulation.helpers.run_steps import (
-    run_neutron_calibration,
+    run_particle_response_calibration,
     run_performance_analysis,
     write_calibration,
 )
@@ -74,7 +74,7 @@ class EfficiencyScanRow:
 def parse_arguments() -> argparse.Namespace:
     # Read one processed run input, the threshold scan, and the CSV output path.
     parser = argparse.ArgumentParser(
-        description="Sweep muon thresholds for one processed neutron run and write a CSV."
+        description="Sweep muon thresholds for one processed signal run and write a CSV."
     )
     parser.add_argument(
         "--events-root",
@@ -288,8 +288,8 @@ def sweep_thresholds(
 
         # Recompute the threshold-specific calibration and performance on the same events.root.
         if arguments.overwrite_validation or not threshold_run_plan.performance_path.exists():
-            _, neutron_scale = run_neutron_calibration(runtime_args, threshold_run_plan)
-            write_calibration(runtime_args, threshold_run_plan, neutron_scale)
+            _, response_scale = run_particle_response_calibration(runtime_args, threshold_run_plan)
+            write_calibration(runtime_args, threshold_run_plan, response_scale)
             run_performance_analysis(runtime_args, threshold_run_plan)
 
         rows.append(load_efficiency_row(threshold_run_plan.performance_path, threshold_GeV))

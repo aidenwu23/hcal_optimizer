@@ -3,14 +3,15 @@
 
 Run the HCAL production campaign from geometry sweeps through manifests.
 Example: 
-python3 conductor.py --spec geometries/sweeps/best_geo.yaml \
-  --muon-events 10000 \
-  --neutron-events 3000 \
-  --seeds 67
+python3 conductor.py --spec geometries/sweeps/bhcal.yaml \
+  --muon-threshold 0.02 \
+  --events 3000 \
+  --gun-particle neutron kaon0L \
+  --seeds 67 --delete-intermediates
 
-python3 conductor.py --spec geometries/sweeps/control_min_max.yaml \
+python3 conductor.py --spec geometries/sweeps/bhcal.yaml \
   --muon-events 10000 \
-  --neutron-events 3000 \
+  --events 3000 \
   --seeds 67
 """
 
@@ -31,7 +32,7 @@ from simulation.helpers.run_steps import (
     maybe_remove_file,
     maybe_run_sweeps,
     run_ddsim,
-    run_neutron_calibration,
+    run_particle_response_calibration,
     run_muon_calibration,
     run_performance_analysis,
     run_process,
@@ -45,7 +46,7 @@ PROJECT_DIRECTORY = Path(__file__).resolve().parent
 
 # Parse the CLI options for one campaign run.
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Orchestrate neutron HCAL production runs.")
+    parser = argparse.ArgumentParser(description="Orchestrate HCAL production runs.")
     parser.add_argument("--spec", "-s", nargs="+", required=True, help="Sweep spec(s) to materialise (YAML).")
     parser.add_argument("--skip-sweep", action="store_true", help="Assume geometries already generated; skip sweep_geometries.py.")
     parser.add_argument("--overwrite-geos", action="store_true", help="Pass --overwrite to sweep_geometries.py.")
@@ -60,11 +61,16 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Optional chunk appended to the processor call.",
     )
-    parser.add_argument("--gun-particle", default="neutron", help="Primary gun particle (default: neutron).")
+    parser.add_argument(
+        "--gun-particle",
+        nargs="+",
+        default=["neutron"],
+        help="Signal gun particle name(s).",
+    )
     parser.add_argument("--gun-energy", type=float, nargs="+", default=[5.0], help="Gun energies in GeV (default: 5).")
     parser.add_argument("--gun-position", default="0 0 0", help="Gun position string passed to ddsim.")
     parser.add_argument("--gun-direction", default="0 0 -1", help="Gun direction string passed to ddsim.")
-    parser.add_argument("--neutron-events", type=int, default=1, help="Number of signal events per ddsim run.")
+    parser.add_argument("--events", type=int, default=1, help="Number of signal events per ddsim run.")
     parser.add_argument(
         "--muon-events",
         type=int,
@@ -136,8 +142,15 @@ def main() -> None:
     # Flatten any extra processor flags once before planning runs.
     extra_process_flags = flatten_process_extras(args.process_extra)
 
-    gun_particle = args.gun_particle.strip().lower()
-    running_muon_sample = gun_particle in ("mu-", "mu+")
+    # Parse all input gun particles.
+    requested_particles = [particle.strip() for particle in args.gun_particle if particle.strip()]
+    if not requested_particles:
+        raise ValueError("At least one --gun-particle value is required.")
+    args.gun_particle = requested_particles
+
+    requested_particle_names = {particle.lower() for particle in requested_particles}
+    all_requested_particles_are_muons = requested_particle_names.issubset({"mu-", "mu+"})
+    has_non_muon_signal_particle = not all_requested_particles_are_muons
 
     # Run one geometry at a time so each geometry finishes fully before the next one starts.
     run_records: List[RunRecord] = []
@@ -147,7 +160,7 @@ def main() -> None:
 
         # For non-muon campaigns, derive one threshold per geometry only when the caller did
         # not provide a fixed threshold on the CLI.
-        if not running_muon_sample and geometry_muon_threshold is None:
+        if has_non_muon_signal_particle and geometry_muon_threshold is None:
             calibration_json_path = run_muon_calibration(args, geometry_variant)
             if not args.dry_run:
                 with calibration_json_path.open("r", encoding="utf-8") as calibration_file:
@@ -177,12 +190,12 @@ def main() -> None:
             saved_muon_threshold = args.muon_threshold
 
             try:
-                neutron_scale = None
-                is_neutron = run_plan.gun_particle.strip().lower() == "neutron"
+                response_scale = None
+                is_muon_signal = run_plan.gun_particle.strip().lower() in ("mu-", "mu+")
 
                 # Use either the fixed CLI threshold or the derived geometry threshold on each
                 # non-muon run.
-                if not running_muon_sample and geometry_muon_threshold is not None:
+                if not is_muon_signal and geometry_muon_threshold is not None:
                     args.muon_threshold = geometry_muon_threshold
 
                 # Run the full chain for this plan from simulation through analysis outputs.
@@ -193,11 +206,11 @@ def main() -> None:
                     extra_process_flags,
                 )
                 maybe_remove_file(args, run_plan.raw_path)
-                if is_neutron:
-                    _, neutron_scale = run_neutron_calibration(args, run_plan)
+                if not is_muon_signal:
+                    _, response_scale = run_particle_response_calibration(args, run_plan)
                 run_record.meta_seconds = write_metadata(args, run_plan)
-                write_calibration(args, run_plan, neutron_scale)
-                if is_neutron:
+                write_calibration(args, run_plan, response_scale)
+                if not is_muon_signal:
                     run_record.performance_seconds = run_performance_analysis(args, run_plan)
                 maybe_remove_file(args, run_plan.events_path)
                 run_record.status = "completed"

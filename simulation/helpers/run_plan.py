@@ -17,6 +17,7 @@ DATA_DIRECTORY = PROJECT_DIRECTORY / "data"
 PARTICLE_PDG: Dict[str, int] = {
     "neutron": 2112,
     "proton": 2212,
+    "kaon0L": 130,
     "pi-": -211,
     "pi+": 211,
     "pion-": -211,
@@ -37,7 +38,10 @@ PARTICLE_PDG: Dict[str, int] = {
 # Translate the conductor particle names into the PDG codes expected by the processor.
 def lookup_pdg(particle: str) -> Optional[int]:
     """Translate a human-readable particle name into a PDG code when possible."""
-    return PARTICLE_PDG.get(particle.strip().lower())
+    particle_name = particle.strip()
+    if particle_name in PARTICLE_PDG:
+        return PARTICLE_PDG[particle_name]
+    return PARTICLE_PDG.get(particle_name.lower())
 
 
 # One fully expanded simulation run, including all file paths that later execution steps need.
@@ -107,45 +111,49 @@ def build_run_plans(
 ) -> List[RunPlan]:
     run_plans: List[RunPlan] = []
     seed_values: List[Optional[int]] = list(args.seeds) if args.seeds is not None else [None]
+    requested_particles = [str(particle).strip() for particle in args.gun_particle if str(particle).strip()]
     for geometry_variant in geometry_variants:
         # Include the processor extras, geometry tag, and detector side in the run identity so
         # distinct physical or processing configurations do not collide onto the same run id.
         run_id_tokens = list(extra_process_flags) + [geometry_variant.tag or "", geometry_variant.side]
-        expected_pdg = args.expected_pdg if args.expected_pdg is not None else lookup_pdg(args.gun_particle)
         gun_direction = geometry_variant.params.get("gun.direction", args.gun_direction)
         gun_position = geometry_variant.params.get("gun.position", args.gun_position)
 
-        # Sweep over every requested seed and energy for this geometry to materialize the full run grid.
-        for seed in seed_values:
+        # Sweep over every requested particle
+        for particle in requested_particles:
+            expected_pdg = args.expected_pdg if args.expected_pdg is not None else lookup_pdg(particle)
+            # Per particle, sweep all requested energies
             for energy in args.gun_energy:
-                run_id, run_id_int = compute_run_id(
-                    geometry_variant.geometry_id,
-                    args.gun_particle,
-                    energy,
-                    seed,
-                    args.neutron_events,
-                    run_id_tokens,
-                )
-                # Keep the raw EDM4hep file and the processed outputs in their standard campaign locations.
-                raw_output_directory = DATA_DIRECTORY / "raw" / geometry_variant.geometry_id
-                processed_output_directory = DATA_DIRECTORY / "processed" / geometry_variant.geometry_id / run_id
-                run_plans.append(
-                    RunPlan(
-                        geometry_variant=geometry_variant,
-                        gun_particle=args.gun_particle,
-                        gun_energy_GeV=energy,
-                        gun_direction=gun_direction,
-                        gun_position=gun_position,
-                        seed=seed,
-                        n_events=args.neutron_events,
-                        run_id=run_id,
-                        run_id_int=run_id_int,
-                        raw_path=raw_output_directory / f"{run_id}.edm4hep.root",
-                        events_path=processed_output_directory / "events.root",
-                        meta_path=processed_output_directory / "meta.json",
-                        calibration_path=processed_output_directory / "calibration.json",
-                        performance_path=processed_output_directory / "performance.json",
-                        expected_pdg=expected_pdg,
+                # Per energy, sweep every requested seed value
+                for seed in seed_values:
+                    run_id, run_id_int = compute_run_id(
+                        geometry_variant.geometry_id,
+                        particle,
+                        energy,
+                        seed,
+                        args.events,
+                        run_id_tokens,
                     )
-                )
+                    # Keep the raw EDM4hep file and the processed outputs in their standard campaign locations.
+                    raw_output_directory = DATA_DIRECTORY / "raw" / geometry_variant.geometry_id
+                    processed_output_directory = DATA_DIRECTORY / "processed" / geometry_variant.geometry_id / run_id
+                    run_plans.append(
+                        RunPlan(
+                            geometry_variant=geometry_variant,
+                            gun_particle=particle,
+                            gun_energy_GeV=energy,
+                            gun_direction=gun_direction,
+                            gun_position=gun_position,
+                            seed=seed,
+                            n_events=args.events,
+                            run_id=run_id,
+                            run_id_int=run_id_int,
+                            raw_path=raw_output_directory / f"{run_id}.edm4hep.root",
+                            events_path=processed_output_directory / "events.root",
+                            meta_path=processed_output_directory / "meta.json",
+                            calibration_path=processed_output_directory / "calibration.json",
+                            performance_path=processed_output_directory / "performance.json",
+                            expected_pdg=expected_pdg,
+                        )
+                    )
     return run_plans

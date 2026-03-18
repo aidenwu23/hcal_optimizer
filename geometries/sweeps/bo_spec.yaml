@@ -1,4 +1,4 @@
-# hcal_generator/sweeps/bo_spec.yaml
+# hcal_optimizer/sweeps/bo_spec.yaml
 
 # This block is copied into the output sweep YAML (except variants, which are filled in)
 sweep_base:

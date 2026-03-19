@@ -3,15 +3,20 @@
 """
 Example usage:
     python3 bayesian_optimization.py \
+        --init-training \
         --rounds 5 \
         --sweep-template geometries/sweeps/template_sweep.yaml \
-        --lhs-sweep geometries/sweeps/sweep000.yaml \
+        --lhs-sweep geometries/sweeps/full_run_NK.yaml \
         --lhs-variants 150 \
         --tag-prefix lhs \
-        --training-csv csv_data/1training_avg.csv \
-        --model model/lgbm_surrogate.joblib \
+        --muon-threshold 0.02 \
+        --gun-particle neutron kaon0L \
+        --gun-kinetic-energy 1 \
+        --events 3000 \
+        --training-csv csv_data/training_NK.csv \
+        --model model/lgbm_surrogate_NK.joblib \
         --bo-spec geometries/sweeps/bo_spec.yaml \
-        --sweep-yaml geometries/sweeps/sweep_bo001.yaml \
+        --sweep-yaml geometries/sweeps/sweep_bo_NK.yaml \
         --processed-root data/processed \
         --pool 20000 \
         --bo-variants 5 \
@@ -44,6 +49,10 @@ def main():
     ap.add_argument("--lhs-sweep", required=True, help="Output sweep YAML path")
     ap.add_argument("--lhs-variants", type=int, required=True, help="Number of LHS variants")
     ap.add_argument("--tag-prefix", default="lhs", help="Variant tag prefix")
+    ap.add_argument("--muon-threshold", type=float, default=None, help="Fixed visible-energy threshold in GeV. Omit to calibrate one threshold per geometry.")
+    ap.add_argument("--gun-particle", nargs="+", default=["neutron"], help="Signal gun particle name(s).")
+    ap.add_argument("--gun-kinetic-energy", type=float, nargs="+", default=None, help="Gun kinetic energies in GeV. Converted to total energy before calling ddsim.")
+    ap.add_argument("--events", type=int, default=1, help="Number of signal events per ddsim run.")
     ap.add_argument("--training-csv", required=True, default="csv_data/1training_avg.csv", help="Master CSV of all evaluated designs")
     ap.add_argument("--model", required=True, help="Path to write surrogate model .joblib")
     ap.add_argument("--bo-spec", help="Path to bo_spec.yaml", default="geometries/sweeps/bo_spec.yaml")
@@ -79,7 +88,10 @@ def main():
         run_cmd([
             "python3", "conductor.py",
             "--spec", args.lhs_sweep,
-            "--events", "2000",
+            "--muon-threshold", args.muon_threshold,
+            "--gun-particle", *(args.gun_particle),
+            "--gun-kinetic-energy", *(args.gun_kinetic_energy),
+            "--events", args.events, 
             "--seeds", args.seed,
             "--delete-intermediates",
             "--overwrite"
@@ -115,7 +127,10 @@ def main():
         run_cmd([
             "python3", "conductor.py",
             "--spec", args.sweep_yaml,
-            "--events", "2000",
+            "--muon-threshold", args.muon_threshold,
+            "--gun-particle",*(args.gun_particle),
+            "--gun-kinetic-energy",*(args.gun_kinetic_energy),
+            "--events", args.events, 
             "--seeds", str(args.seed + r),
             "--delete-intermediates",
             "--overwrite"

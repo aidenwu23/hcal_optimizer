@@ -3,7 +3,7 @@
 
 Run the HCAL production campaign from geometry sweeps through manifests.
 Example: 
-python3 conductor.py --spec geometries/sweeps/bhcal.yaml \
+python3 conductor.py --spec geometries/sweeps/ab14479f.yaml \
   --muon-threshold 0.02 \
   --events 3000 \
   --gun-particle neutron kaon0L \

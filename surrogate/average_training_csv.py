@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Average a run-level surrogate training CSV into one row per geometry/particle/energy point.
+Average a run-level surrogate training CSV into one row per geometry.
 Example:
 python3 surrogate/average_training_csv.py \
-  --in surrogate/csv_data/training.csv \
-  --out surrogate/csv_data/training_avg.csv
+  --in surrogate/csv_data/training_NK.csv \
+  --out surrogate/csv_data/training_NK_avg.csv
 """
 
 from __future__ import annotations
@@ -12,11 +12,11 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import re
 from collections import defaultdict
 from pathlib import Path
 
-FEATURE_COLUMNS = [
-    "gun_particle",
+GEOMETRY_FEATURES = [
     "nLayers",
     "seg1_layers",
     "seg2_layers",
@@ -28,28 +28,11 @@ FEATURE_COLUMNS = [
     "t_scin_seg2",
     "t_scin_seg3",
     "t_spacer",
-    "gun_energy_GeV",
-    "muon_threshold_GeV",
 ]
-
-GROUP_BY_COLUMNS = [
-    "geometry_id",
-    "gun_particle",
-    "gun_energy_GeV",
-    "muon_threshold_GeV",
-]
-
-AVERAGE_COLUMNS = [
-    "detection_efficiency",
-    "eff_lo",
-    "eff_hi",
-    "energy_resolution",
-]
-
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Average a run-level surrogate training CSV by geometry, particle, energy, and threshold."
+        description="Average a run-level surrogate training CSV into one geometry-level row."
     )
     parser.add_argument(
         "--in",
@@ -89,8 +72,40 @@ def sample_std(values: list[float]) -> float | None:
     return math.sqrt(variance)
 
 
+def normalize_particle_name(particle_name: str) -> str:
+    return particle_name.strip()
+
+
+def particle_column_prefix(particle_name: str) -> str:
+    # Convert a particle name into a CSV-safe suffix.
+    normalized_name = normalize_particle_name(particle_name)
+    column_prefix = normalized_name.replace("+", "_plus_").replace("-", "_minus_")
+    column_prefix = re.sub(r"[^A-Za-z0-9]+", "_", column_prefix).strip("_")
+    if not column_prefix:
+        raise ValueError(f"Cannot derive a column prefix from particle name {particle_name!r}.")
+    if column_prefix[0].isdigit():
+        column_prefix = f"particle_{column_prefix}"
+    return column_prefix
+
+
+def build_particle_column_map(particle_names: list[str]) -> dict[str, str]:
+    # Keep one unique output prefix per particle name.
+    column_map: dict[str, str] = {}
+    names_by_prefix: dict[str, str] = {}
+    for particle_name in particle_names:
+        column_prefix = particle_column_prefix(particle_name)
+        if column_prefix in names_by_prefix and names_by_prefix[column_prefix] != particle_name:
+            raise ValueError(
+                f"Particle names {names_by_prefix[column_prefix]!r} and {particle_name!r} "
+                f"both map to the same output prefix {column_prefix!r}."
+            )
+        names_by_prefix[column_prefix] = particle_name
+        column_map[particle_name] = column_prefix
+    return column_map
+
+
 def main() -> int:
-    # Read the run-level rows, group them by geometry/particle/energy/threshold, then write one averaged row per point.
+    # Collapse the run-level CSV into one geometry-level row with per-particle metrics.
     arguments = parse_arguments()
     input_path = Path(arguments.input_csv).expanduser().resolve()
     output_path = Path(arguments.out).expanduser().resolve()
@@ -98,62 +113,93 @@ def main() -> int:
     if not input_path.exists():
         raise FileNotFoundError(f"Training CSV not found: {input_path}")
 
+    # Read the input rows once and collect the particle names that appear in the file.
     with input_path.open("r", encoding="utf-8", newline="") as input_file:
         reader = csv.DictReader(input_file)
         if reader.fieldnames is None:
             raise ValueError(f"{input_path} does not contain a CSV header.")
-        missing_group_columns = [column_name for column_name in GROUP_BY_COLUMNS if column_name not in reader.fieldnames]
-        if missing_group_columns:
-            raise ValueError(f"{input_path} is missing required columns: {missing_group_columns}")
+        required_columns = [
+            "geometry_id",
+            "gun_particle",
+            "detection_efficiency",
+            "energy_resolution",
+            *GEOMETRY_FEATURES,
+        ]
+        missing_required_columns = [
+            column_name for column_name in required_columns if column_name not in reader.fieldnames
+        ]
+        if missing_required_columns:
+            raise ValueError(f"{input_path} is missing required columns: {missing_required_columns}")
 
-        rows_by_group: dict[tuple[str, ...], list[dict[str, str]]] = defaultdict(list)
+        rows_by_geometry: dict[str, list[dict[str, str]]] = defaultdict(list)
+        particle_names: set[str] = set()
         for row in reader:
-            group_key = tuple(row.get(column_name, "").strip() for column_name in GROUP_BY_COLUMNS)
-            if not group_key[0]:
+            geometry_id = row.get("geometry_id", "").strip()
+            if not geometry_id:
                 raise ValueError("Encountered a row with an empty geometry_id.")
-            rows_by_group[group_key].append(row)
+            particle_name = normalize_particle_name(row.get("gun_particle", ""))
+            if not particle_name:
+                raise ValueError(f"Encountered a row with an empty gun_particle for geometry_id={geometry_id}.")
+            particle_names.add(particle_name)
+            rows_by_geometry[geometry_id].append(row)
 
+    ordered_particle_names = sorted(particle_names)
+    particle_column_map = build_particle_column_map(ordered_particle_names)
     output_rows: list[dict[str, object]] = []
-    # Collapse all runs for one geometry/particle/energy/threshold point into one averaged training row.
-    for group_key in sorted(rows_by_group):
-        geometry_rows = rows_by_group[group_key]
-        first_row = geometry_rows[0]
-
+    # Build one output row per geometry.
+    for geometry_id in sorted(rows_by_geometry):
+        geometry_rows = rows_by_geometry[geometry_id]
+        reference_row = geometry_rows[0]
         output_row: dict[str, object] = {
-            "geometry_id": group_key[0],
-            "n_runs": len(geometry_rows),
+            "geometry_id": geometry_id,
         }
+        for column_name in GEOMETRY_FEATURES:
+            output_row[column_name] = reference_row.get(column_name, "")
 
-        for column_name in FEATURE_COLUMNS:
-            output_row[column_name] = first_row.get(column_name, "")
+        # Split this geometry's rows by particle before averaging the metrics.
+        rows_by_particle: dict[str, list[dict[str, str]]] = defaultdict(list)
+        for row in geometry_rows:
+            particle_name = normalize_particle_name(row.get("gun_particle", ""))
+            rows_by_particle[particle_name].append(row)
 
-        for column_name in AVERAGE_COLUMNS:
-            values = []
-            for row in geometry_rows:
-                parsed_value = parse_float(row.get(column_name, ""))
-                if parsed_value is not None:
-                    values.append(parsed_value)
+        for particle_name in ordered_particle_names:
+            particle_rows = rows_by_particle.get(particle_name, [])
+            column_prefix = particle_column_map[particle_name]
 
-            average_value = mean(values)
-            std_value = sample_std(values)
-            output_row[column_name] = "" if average_value is None else average_value
-            output_row[f"{column_name}_std"] = "" if std_value is None else std_value
+            efficiency_values = []
+            resolution_values = []
+            # Average the available metrics for this geometry-particle slice.
+            for row in particle_rows:
+                parsed_efficiency = parse_float(row.get("detection_efficiency", ""))
+                if parsed_efficiency is not None:
+                    efficiency_values.append(parsed_efficiency)
+                parsed_resolution = parse_float(row.get("energy_resolution", ""))
+                if parsed_resolution is not None:
+                    resolution_values.append(parsed_resolution)
+
+            efficiency_column_name = f"{column_prefix}_efficiency"
+            resolution_column_name = f"{column_prefix}_energy_resolution"
+            output_row[efficiency_column_name] = "" if not efficiency_values else mean(efficiency_values)
+            output_row[f"{efficiency_column_name}_std"] = "" if not efficiency_values else sample_std(efficiency_values)
+            output_row[resolution_column_name] = "" if not resolution_values else mean(resolution_values)
+            output_row[f"{resolution_column_name}_std"] = "" if not resolution_values else sample_std(resolution_values)
 
         output_rows.append(output_row)
 
     fieldnames = [
         "geometry_id",
-        "n_runs",
-        *FEATURE_COLUMNS,
-        "detection_efficiency",
-        "detection_efficiency_std",
-        "eff_lo",
-        "eff_lo_std",
-        "eff_hi",
-        "eff_hi_std",
-        "energy_resolution",
-        "energy_resolution_std",
+        *GEOMETRY_FEATURES,
     ]
+    for particle_name in ordered_particle_names:
+        column_prefix = particle_column_map[particle_name]
+        fieldnames.extend(
+            [
+                f"{column_prefix}_efficiency",
+                f"{column_prefix}_efficiency_std",
+                f"{column_prefix}_energy_resolution",
+                f"{column_prefix}_energy_resolution_std",
+            ]
+        )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8", newline="") as output_file:

@@ -18,9 +18,9 @@ source setup.sh            # add build outputs to PATH and set library paths
 The optimization loop alternates between two scripts:
 
 ```
-sweep YAML --> conductor.py --> ddsim --> event processor --> calibratoin --> performance
+sweep YAML --> conductor.py --> ddsim --> event processor --> calibration --> performance metrics
 
-performance --> orchestrator --> train surrogate/select best observed --> propose batch --> set up next sweep yaml
+performance metrics --> orchestrator --> train surrogate/select best observed --> propose batch --> set up next sweep yaml
 ```
 
 ### 1. Generate an initial geometry set

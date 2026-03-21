@@ -5,20 +5,20 @@ train_surrogate.py
 
 Train a LightGBM-based surrogate model mapping calorimeter geometry
 (absorber/scintillator thickness, segmentation, etc.)
-to neutron performance metrics at fixed muon false-positive rate.
+to geometry-level multi-particle performance metrics.
 
 Targets:
-  - detection_efficiency
-  - energy_resolution
+  - inferred from the geometry-level training CSV
+  - metric standard-deviation columns are excluded automatically
 
 Usage: 
 
 python ./surrogate/train_surrogate.py \
-  --training-csv ./csv_data/training.csv \
+  --training-csv ./csv_data/training_avg.csv \
   --output-model ./model/lgbm_surrogate.joblib
 
 python ./surrogate/train_surrogate.py \
-  --training-csv ./csv_data/training.csv \
+  --training-csv ./csv_data/training_avg.csv \
   --load-model ./model/lgbm_surrogate.joblib \
   --output-model ./model/lgbm_surrogate_updated.joblib
 
@@ -29,7 +29,6 @@ import argparse
 import os
 import joblib
 import pandas as pd
-import numpy as np
 
 from lightgbm import LGBMRegressor
 from sklearn.multioutput import MultiOutputRegressor
@@ -37,12 +36,11 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_percentage_error
 
 
-# -------------------------
+# -----------------------------------------------------------------------------------------
 # Feature / target schema
-# -------------------------
+# -----------------------------------------------------------------------------------------
 
 FEATURE_COLUMNS = [
-    "gun_energy_GeV",
     "seg1_layers",
     "seg2_layers",
     "seg3_layers",
@@ -54,45 +52,39 @@ FEATURE_COLUMNS = [
     "t_scin_seg3",
 ]
 
-TARGET_COLUMNS = [
-    "neutron_efficiency",
-    "kaon0L_efficiency",
-    "energy_resolution",
-]
+# Since there are multiple targets to predict, we simply tell the model what not to predict.
+NON_TARGET_COLUMNS = {
+    "geometry_id",
+    "nLayers",
+    "t_spacer",
+    *FEATURE_COLUMNS,
+}
 
-#ENERGY_WEIGHTS = {
-#    0.9396: 0.258087,
-#    0.9496: 0.410015,
-#    0.9696: 0.244815,
-#    1.0396: 0.0824557,
-#    1.9396: 0.00462638,
-#}
-
-# -------------------------
+# -----------------------------------------------------------------------------------------
 # Argument parsing
-# -------------------------
+# -----------------------------------------------------------------------------------------
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Train a LightGBM surrogate model for neutron performance"
+        description="Train a LightGBM surrogate model on geometry-level performance metrics"
     )
 
     parser.add_argument(
         "--training-csv",
         required=True,
-        help="Path to training.csv input file"
+        help="Path to the geometry-level training CSV"
     )
 
     parser.add_argument(
         "--load-model",
         default=None,
-        help="Optional path to an existing surrogate model to continue training"
+        help="Optional path to an existing surrogate model bundle to continue training"
     )
 
     parser.add_argument(
         "--output-model",
         required=True,
-        help="Path to save trained surrogate model (joblib format)"
+        help="Path to save the trained surrogate model bundle (joblib format)"
     )
 
     parser.add_argument(
@@ -112,9 +104,23 @@ def parse_args():
     return parser.parse_args()
 
 
-# -------------------------
+def infer_target_columns(df: pd.DataFrame) -> list[str]:
+    # Use all geometry-level metric columns except the per-metric uncertainty columns.
+    target_columns: list[str] = []
+    for column_name in df.columns:
+        if column_name in NON_TARGET_COLUMNS or column_name.endswith("_std"):
+            continue
+        target_columns.append(column_name)
+
+    if not target_columns:
+        raise ValueError("No geometry-level target columns found in training CSV.")
+
+    return target_columns
+
+
+# -----------------------------------------------------------------------------------------
 # Main training logic
-# -------------------------
+# -----------------------------------------------------------------------------------------
 
 def main():
     args = parse_args()
@@ -127,54 +133,24 @@ def main():
 
     df = pd.read_csv(args.training_csv)
 
-    # Basic sanity checks
     missing_features = [c for c in FEATURE_COLUMNS if c not in df.columns]
-    missing_targets = [c for c in TARGET_COLUMNS if c not in df.columns]
-
     if missing_features:
         raise ValueError(f"Missing feature columns: {missing_features}")
-    if missing_targets:
-        raise ValueError(f"Missing target columns: {missing_targets}")
 
     # Drop invalid rows if requested by schema
     if "valid_flag" in df.columns:
         df = df[df["valid_flag"] == 1]
 
+    target_columns = infer_target_columns(df)
+
     # Extract features / targets
     X = df[FEATURE_COLUMNS]
-    y = df[TARGET_COLUMNS]
-
-    # Compute sample weights based on gun energy
-    #energies = df["gun_energy_GeV"].astype(float)
-
-    #make sure it exists
-    #GUN_POINTS = np.array(sorted(ENERGY_WEIGHTS.keys()), dtype=float)
-    #if len(GUN_POINTS) == 0:
-    #    raise ValueError("ENERGY_WEIGHTS is empty. Please define energy weights.")
-
-    
-    #def snap_energy(e):
-    #    return float(GUN_POINTS[np.argmin(np.abs(GUN_POINTS - e))])
-
-    #e_snap = energies.apply(snap_energy)
-
-    #q(E): how many samples you have at each gun energy
-    #counts = e_snap.value_counts().to_dict()
-
-    #p(E): realistic spectrum weight at that energy (from histogram-derived dict)
-    #p = e_snap.map(lambda e: ENERGY_WEIGHTS[e]).astype(float)
-
-    # importance weights: p(E)/q(E)
-    #w = np.array([p_i / counts[e] for p_i, e in zip(p.values, e_snap.values)], dtype=float)
-    
-    
-    # FIXME: Normalize to make mean weight ~1
-    #w = w / np.mean(w)
+    y = df[target_columns]
 
     # -------------------------
-    # Train / validation split (X, y)
+    # Train / validation split
     # -------------------------
-    X_train, X_val, y_train, y_val = train_test_split( #w_train, w_val
+    X_train, X_val, y_train, y_val = train_test_split(
         X,
         y,
         test_size=args.test_fraction,
@@ -186,7 +162,21 @@ def main():
     # -------------------------
     if args.load_model:
         print(f"Loading existing surrogate model: {args.load_model}")
-        model = joblib.load(args.load_model)
+        loaded_payload = joblib.load(args.load_model)
+        if isinstance(loaded_payload, dict) and "model" in loaded_payload:
+            model = loaded_payload["model"]
+            loaded_features = list(loaded_payload.get("feature_columns", []))
+            loaded_targets = list(loaded_payload.get("target_columns", []))
+            if loaded_features and loaded_features != FEATURE_COLUMNS:
+                raise ValueError(
+                    "Loaded model feature columns do not match the geometry-level training schema."
+                )
+            if loaded_targets and loaded_targets != target_columns:
+                raise ValueError(
+                    "Loaded model target columns do not match the current training CSV."
+                )
+        else:
+            model = loaded_payload
     else:
         print("Creating new LightGBM surrogate model")
 
@@ -207,27 +197,15 @@ def main():
     # -------------------------
     print("Training surrogate model")
     model.fit(X_train, y_train)
-    #sample_weight=w_train
 
     # -------------------------
     # Validation diagnostics
     # -------------------------
     val_pred = model.predict(X_val)
-    val_pred = pd.DataFrame(val_pred, columns=TARGET_COLUMNS)
-
-    #print("\nValidation summary (mean absolute error):")
-    #for col in TARGET_COLUMNS:
-    #    mae = np.mean(np.abs(val_pred[col] - y_val[col].values))
-    #    print(f"  {col:20s}: MAE = {mae:.5f}")
-
-    #print("\nValidation summary (weighted mean absolute error):")
-    #for col in TARGET_COLUMNS:
-    #    err = np.abs(val_pred[col].values - y_val[col].values)
-    #    wmae = np.sum(err * w_val) / np.sum(w_val)
-    #    print(f" {col:20s}: wMAE = {wmae:.5f}")
+    val_pred = pd.DataFrame(val_pred, columns=target_columns)
 
     print("\nValidation summary (mean absolute percentage error):")
-    for col in TARGET_COLUMNS:
+    for col in target_columns:
         mape_normalized = mean_absolute_percentage_error(val_pred[col], y_val[col].values)
         mape_percentage = mape_normalized * 100
         print(f"  {col:20s}: MAE = {mape_percentage:.2f}")
@@ -235,13 +213,18 @@ def main():
     # -------------------------
     # Save trained model
     # -------------------------
-    os.makedirs(os.path.dirname(args.output_model), exist_ok=True)
-    joblib.dump(model, args.output_model)
+    output_path = os.path.abspath(args.output_model)
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    payload = {
+        "model": model,
+        "feature_columns": FEATURE_COLUMNS,
+        "target_columns": target_columns,
+    }
+    joblib.dump(payload, output_path)
 
-    print(f"\nTrained surrogate model saved to: {args.output_model}")
+    print(f"\nTrained surrogate model saved to: {output_path}")
 
 
 
 if __name__ == "__main__":
     main()
-

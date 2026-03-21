@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
-"""conductor.py
+"""
+Generate geometries from a sweep spec, run simulation and analysis, and write
+processed performance results for orchestrator.py.
 
-Run the HCAL production campaign from geometry sweeps through manifests.
 Example: 
-python3 conductor.py --spec geometries/sweeps/ab14479f.yaml \
+python3 conductor.py --spec geometries/sweeps/best_geo.yaml \
+  --muon-threshold 0.02 \
+  --events 3000 \
+  --gun-particle neutron kaon0L \
+  --gun-kinetic-energy 1 \
+  --seeds 67 --delete-intermediates
+
+python3 conductor.py --spec geometries/sweeps/control/best_geo_old.yaml \
   --muon-threshold 0.02 \
   --events 3000 \
   --gun-particle neutron kaon0L \
@@ -11,9 +19,11 @@ python3 conductor.py --spec geometries/sweeps/ab14479f.yaml \
   --seeds 67 --delete-intermediates
 
 python3 conductor.py --spec geometries/sweeps/bhcal.yaml \
-  --muon-events 10000 \
+  --muon-threshold 0.02 \
   --events 3000 \
-  --seeds 67
+  --gun-particle neutron kaon0L \
+  --gun-kinetic-energy 1 \
+  --seeds 67 --delete-intermediates
 """
 
 from __future__ import annotations

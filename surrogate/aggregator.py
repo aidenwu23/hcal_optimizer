@@ -13,7 +13,7 @@
 """
 python3 surrogate/aggregator.py \
   --processed-root data/processed \
-  --out surrogate/csv_data/training.csv
+  --out surrogate/csv_data/result_comparison.csv
 """
 
 import argparse, json

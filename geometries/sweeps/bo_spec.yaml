@@ -35,7 +35,6 @@ bounds:
 
 # Fixed surrogate inputs that are not part of the geometry proposal
 fixed_features:
-  gun_energy_GeV: 5.0
   seg1_layers: 3
   seg2_layers: 3
   seg3_layers: 4
@@ -43,16 +42,16 @@ fixed_features:
 constraints:
   # Constraints on surrogate outputs
   predicted:
-    - "energy_resolution <= 0.50"
+    - "neutron_energy_resolution <= 0.50"
+    - "kaon0L_energy_resolution <= 0.50"
 
 scoring:
-  mode: "metric"   # metric | tradeoff
-  metric: "detection_efficiency" # detection_efficiency | eff_lo | eff_hi | energy_resolution
+  mode: "tradeoff"   # metric | tradeoff
+  expr: "neutron_efficiency + kaon0L_efficiency"
   maximize: true
 
   # Example if you want a tradeoff instead:
-  # mode: "tradeoff"
-  # expr: "detection_efficiency - 2.0*energy_resolution"
+  # expr: "neutron_efficiency + kaon0L_efficiency - neutron_energy_resolution - kaon0L_energy_resolution"
   # maximize: true
 
 diversity:

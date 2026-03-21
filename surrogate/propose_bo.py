@@ -11,7 +11,6 @@ a sweep YAML compatible with hcal_optimizer/geometries/sweep_geometries.py.
     * fixed_features -> fixed surrogate inputs
     * sweep_base.constants -> fixed geometry written into output YAML
 - Surrogate expects features:
-    gun_energy_GeV,
     seg1_layers, seg2_layers, seg3_layers,
     t_absorber_seg1/2/3, t_scin_seg1/2/3
   
@@ -46,12 +45,7 @@ try:
 except Exception:
     _TORCH_OK = False
 
-
-# -----------------------------
-# Surrogate schema 
-# -----------------------------
 SURROGATE_FEATURES = [
-    "gun_energy_GeV",
     "seg1_layers",
     "seg2_layers",
     "seg3_layers",
@@ -64,11 +58,12 @@ SURROGATE_FEATURES = [
 ]
 
 SURROGATE_TARGETS = [
-    "detection_efficiency",
-    "energy_resolution",
+    "kaon0L_efficiency",
+    "kaon0L_energy_resolution",
+    "neutron_efficiency",
+    "neutron_energy_resolution",
 ]
 
-# Geometry knobs we propose 
 GEOM_VARS = [
     "seg1_layers",
     "seg2_layers",
@@ -82,15 +77,33 @@ GEOM_VARS = [
 ]
 
 
-# -----------------------------
+# -------------------------------------------------------------------------------------------------
 # Sampling helpers
-# -----------------------------
+# -------------------------------------------------------------------------------------------------
 def sobol_u01(n: int, d: int, seed: int) -> np.ndarray:
     if _TORCH_OK:
         eng = torch.quasirandom.SobolEngine(dimension=d, scramble=True, seed=seed)
         return eng.draw(n).cpu().numpy()
     rng = np.random.default_rng(seed)
     return rng.random((n, d))
+
+def load_model_bundle(model_path: str) -> Tuple[Any, List[str], List[str]]:
+    loaded_payload = joblib.load(model_path)
+    if isinstance(loaded_payload, dict) and "model" in loaded_payload:
+        model = loaded_payload["model"]
+        feature_columns = list(loaded_payload.get("feature_columns", []))
+        target_columns = list(loaded_payload.get("target_columns", []))
+    else:
+        model = loaded_payload
+        feature_columns = SURROGATE_FEATURES
+        target_columns = SURROGATE_TARGETS
+
+    if not feature_columns:
+        raise SystemExit("Loaded model bundle is missing feature_columns.")
+    if not target_columns:
+        raise SystemExit("Loaded model bundle is missing target_columns.")
+
+    return model, feature_columns, target_columns
 
 
 def parse_bounds(bounds_spec: Dict[str, Any], var_names: List[str]) -> Tuple[np.ndarray, np.ndarray, List[Dict[str, Any]]]:
@@ -161,9 +174,9 @@ def diverse_topk(X: np.ndarray, scores: np.ndarray, k: int, min_dist: float, low
     return np.array(chosen[:k], dtype=int)
 
 
-# -----------------------------
+# -------------------------------------------------------------------------------------------------
 # Constraint + scoring helpers
-# -----------------------------
+# -------------------------------------------------------------------------------------------------
 def safe_eval_expr(expr: str, local_vars: Dict[str, Any]) -> bool:
     return bool(eval(expr, {"__builtins__": {}}, local_vars))
 
@@ -222,7 +235,7 @@ def score_candidates(pred: Dict[str, np.ndarray], scoring: Dict[str, Any]) -> np
             scores = -scores
         return scores
 
-    metric = str(scoring.get("metric", "eff_lo"))
+    metric = str(scoring.get("metric", next(iter(pred.keys()))))
     if metric not in pred:
         raise SystemExit(f"Unknown scoring.metric '{metric}'. Available: {list(pred.keys())}")
     scores = pred[metric].astype(float).copy()
@@ -231,21 +244,24 @@ def score_candidates(pred: Dict[str, np.ndarray], scoring: Dict[str, Any]) -> np
     return scores
 
 
-# -----------------------------
+# -------------------------------------------------------------------------------------------------
 # Mapping geometry -> surrogate features
-# -----------------------------
-def geom_to_surrogate_features(X_geom: np.ndarray, geom_var_names: List[str], fixed_features: Dict[str, Any]) -> np.ndarray:
+# -------------------------------------------------------------------------------------------------
+def geom_to_surrogate_features(
+    X_geom: np.ndarray,
+    geom_var_names: List[str],
+    feature_columns: List[str],
+    fixed_features: Dict[str, Any],
+) -> np.ndarray:
     """
-    X_geom columns correspond to GEOM_VARS in cm for thickness (seg thicknesses).
-    Convert to surrogate feature matrix in SURROGATE_FEATURES order.
-    Assumption: t_absorber_seg* and t_scin_seg* are in cm, convert to mm for surrogate.
+    Build the surrogate feature matrix in the saved model feature order.
     """
     n = X_geom.shape[0]
-    Xs = np.zeros((n, len(SURROGATE_FEATURES)), dtype=float)
-    feat_idx = {f: i for i, f in enumerate(SURROGATE_FEATURES)}
+    Xs = np.zeros((n, len(feature_columns)), dtype=float)
+    feat_idx = {f: i for i, f in enumerate(feature_columns)}
     geom_idx = {g: i for i, g in enumerate(geom_var_names)}
 
-    # fixed features
+    # Fixed features
     for k, v in (fixed_features or {}).items():
         if k not in feat_idx:
             raise SystemExit(f"fixed_features contains unknown surrogate feature '{k}'")
@@ -260,9 +276,9 @@ def geom_to_surrogate_features(X_geom: np.ndarray, geom_var_names: List[str], fi
     return Xs
 
 
-# -----------------------------
+# -------------------------------------------------------------------------------------------------
 # YAML emission
-# -----------------------------
+# -------------------------------------------------------------------------------------------------
 def build_sweep_yaml(sweep_base: Dict[str, Any], X_geom: np.ndarray, geom_var_names: List[str]) -> Dict[str, Any]:
     """
     Output sweep YAML using sweep_base plus generated variants.
@@ -294,20 +310,20 @@ def build_sweep_yaml(sweep_base: Dict[str, Any], X_geom: np.ndarray, geom_var_na
     return out
 
 
-# -----------------------------
+# -------------------------------------------------------------------------------------------------
 # Main
-# -----------------------------
+# -------------------------------------------------------------------------------------------------
 def main() -> None:
     ap = argparse.ArgumentParser(description="Propose next geometries (Option A) and write a sweep YAML.")
-    ap.add_argument("--model", required=True, help="Path to trained surrogate .joblib (MultiOutputRegressor LGBM).")
-    ap.add_argument("--spec", required=True, help="Path to bo_spec.yaml (e.g. ../hcal_optimizer/geometries/sweeps/bo_spec.yaml).")
-    ap.add_argument("--out", required=True, help="Output sweep YAML path (e.g. ../hcal_optimizer/geometries/sweeps/sweep_bo001.yaml).")
+    ap.add_argument("--model", required=True, help="Path to trained surrogate .joblib bundle.")
+    ap.add_argument("--spec", required=True, help="Path to bo_spec.yaml.")
+    ap.add_argument("--out", required=True, help="Output sweep YAML path.")
     ap.add_argument("--pool", type=int, default=20000, help="Number of random/Sobol candidates to sample.")
     ap.add_argument("--k", type=int, default=32, help="Number of variants to output.")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
-    # Load spec
+    # Load spec.
     with open(args.spec, "r", encoding="utf-8") as f:
         spec = yaml.safe_load(f) or {}
 
@@ -332,6 +348,7 @@ def main() -> None:
     scoring = spec.get("scoring", {}) or {}
     diversity = spec.get("diversity", {}) or {}
     min_dist = float(diversity.get("min_l2_norm", 0.05))
+    model, feature_columns, target_columns = load_model_bundle(args.model)
 
     # Determine which geometry variables we propose.
     # Allow only a subset of GEOM_VARS to be optimized; the rest may come from fixed_features.
@@ -344,10 +361,8 @@ def main() -> None:
         )
 
     missing_for_surrogate = [
-        k for k in SURROGATE_FEATURES
-        if k != "gun_energy_GeV"
-        and k not in geom_var_names
-        and k not in fixed_features
+        k for k in feature_columns
+        if k not in geom_var_names and k not in fixed_features
     ]
 
     if missing_for_surrogate:
@@ -356,34 +371,37 @@ def main() -> None:
             f"{missing_for_surrogate}"
         )
     
-    # Parse bounds
+    # Parse bounds.
     lows, highs, meta = parse_bounds(bounds_spec, geom_var_names)
 
-    # Sample pool in geometry space
+    # Sample pool in geometry space.
     u = sobol_u01(args.pool, len(geom_var_names), seed=args.seed)
     X_geom = lows + (highs - lows) * u
     X_geom = apply_discreteness(X_geom, geom_var_names, meta)
 
-    # Apply design constraints first (cheap)
+    # Apply design constraints first (cheap).
     ok_design = filter_design_constraints(X_geom, geom_var_names, design_exprs)
     X_geom_d = X_geom[ok_design]
     if X_geom_d.shape[0] == 0:
         raise SystemExit("No candidates satisfy design constraints. Loosen constraints or increase bounds/pool.")
 
-    # Build surrogate features + predict
-    model = joblib.load(args.model)
-
-    Xs = geom_to_surrogate_features(X_geom_d, geom_var_names, fixed_features)
+    # Build surrogate features + predict.
+    Xs = geom_to_surrogate_features(
+        X_geom_d,
+        geom_var_names,
+        feature_columns,
+        fixed_features,
+    )
 
     import pandas as pd
-    Xs_df = pd.DataFrame(Xs, columns=SURROGATE_FEATURES)
+    Xs_df = pd.DataFrame(Xs, columns=feature_columns)
 
     Y = np.asarray(model.predict(Xs_df))
 
-    if Y.ndim != 2 or Y.shape[1] != len(SURROGATE_TARGETS):
-        raise SystemExit(f"Unexpected surrogate output shape {Y.shape}; expected (N,{len(SURROGATE_TARGETS)}).")
+    if Y.ndim != 2 or Y.shape[1] != len(target_columns):
+        raise SystemExit(f"Unexpected surrogate output shape {Y.shape}; expected (N,{len(target_columns)}).")
 
-    pred = {name: Y[:, i] for i, name in enumerate(SURROGATE_TARGETS)}
+    pred = {name: Y[:, i] for i, name in enumerate(target_columns)}
 
     # Apply predicted constraints
     ok_pred = filter_predicted_constraints(pred, pred_exprs)

@@ -6,15 +6,15 @@ propose the next geometry batch for conductor.py.
 
 Example:
 python3 orchestrator.py \
-  --processed-root data/processed \
-  --training-csv surrogate/csv_data/training_NK_avg_2.csv \
-  --run-level-csv surrogate/csv_data/training_NK_2.csv \
-  --model surrogate/model/lgbm_surrogate_NK.joblib \
+  --training-csv surrogate/csv_data/training_NK_avg_0-2.csv \
+  --run-level-csv surrogate/csv_data/training_NK_0-2.csv \
+  --model surrogate/model/lgbm_surrogate_NK_0-2.joblib \
   --bo-spec geometries/sweeps/bo_spec.yaml \
-  --sweep-yaml geometries/sweeps/proposed_2.yaml \
+  --sweep-yaml geometries/sweeps/proposed/proposed_2.yaml \
   --pool 20000 \
   --bo-variants 5 \
   --seed 10 \
+  --processed-root data/processed \
   --overwrite
 
 Don't use overwrite if you already have training csv file.

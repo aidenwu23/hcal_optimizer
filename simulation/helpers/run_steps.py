@@ -139,7 +139,7 @@ def run_muon_calibration(args: argparse.Namespace, geometry_variant: GeometryVar
 def run_ddsim(args: argparse.Namespace, run_plan: RunPlan) -> float:
     """Fire ddsim for this plan and return the wall-clock seconds spent."""
     ensure_dir(run_plan.raw_path.parent)
-    energy_expression = f"{run_plan.gun_energy_GeV}*GeV"
+    energy_expression = f"{run_plan.total_energy_GeV}*GeV"
 
     # Keep the gun settings and particle-tracking options explicit so the raw file contains the
     # full truth record needed by later calibration and performance steps.
@@ -208,7 +208,8 @@ def write_metadata(
     payload: Dict[str, Any] = {
         "geometry_id": run_plan.geometry_variant.geometry_id,
         "gun_particle": run_plan.gun_particle,
-        "gun_energy_GeV": run_plan.gun_energy_GeV,
+        "kinetic_energy_GeV": run_plan.kinetic_energy_GeV,
+        "total_energy_GeV": run_plan.total_energy_GeV,
         "seed": run_plan.seed,
     }
     start = time.time()
@@ -263,7 +264,7 @@ def run_particle_response_calibration(
         "-l",
         "-b",
         "-q",
-        f'{macro_path}("{run_plan.events_path}",{run_plan.gun_energy_GeV:.12g},{args.muon_threshold:.12g},"{calibration_path}")',
+        f'{macro_path}("{run_plan.events_path}",{run_plan.total_energy_GeV:.12g},{args.muon_threshold:.12g},"{calibration_path}")',
     ]
     start = time.time()
     run_cmd(command, dry_run=args.dry_run, label="particle_response_calibration")
@@ -312,7 +313,8 @@ def write_run_manifests(run_records: List[RunRecord], json_path: Path, csv_path:
                 "geometry_id": run_record.plan.geometry_variant.geometry_id,
                 "run_id": run_record.plan.run_id,
                 "particle": run_record.plan.gun_particle,
-                "energy_GeV": run_record.plan.gun_energy_GeV,
+                "kinetic_energy_GeV": run_record.plan.kinetic_energy_GeV,
+                "total_energy_GeV": run_record.plan.total_energy_GeV,
                 "seed": run_record.plan.seed,
                 "status": run_record.status,
                 "raw_path": str(run_record.plan.raw_path),
@@ -331,7 +333,8 @@ def write_run_manifests(run_records: List[RunRecord], json_path: Path, csv_path:
         "geometry_id",
         "run_id",
         "particle",
-        "energy_GeV",
+        "kinetic_energy_GeV",
+        "total_energy_GeV",
         "seed",
         "status",
         "raw_path",

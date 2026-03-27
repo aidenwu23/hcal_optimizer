@@ -5,10 +5,10 @@ train_surrogate.py
 
 Train a LightGBM-based surrogate model mapping calorimeter geometry
 (absorber/scintillator thickness, segmentation, etc.)
-to geometry-level multi-particle performance metrics.
+and kinetic energy to compact multi-particle performance metrics.
 
 Targets:
-  - inferred from the geometry-level training CSV
+  - inferred from the compact training CSV
   - metric standard-deviation columns are excluded automatically
 
 Usage: 
@@ -41,6 +41,7 @@ from sklearn.metrics import mean_absolute_percentage_error
 # -----------------------------------------------------------------------------------------
 
 FEATURE_COLUMNS = [
+    "kinetic_energy_GeV",
     "seg1_layers",
     "seg2_layers",
     "seg3_layers",
@@ -66,13 +67,13 @@ NON_TARGET_COLUMNS = {
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Train a LightGBM surrogate model on geometry-level performance metrics"
+        description="Train a LightGBM surrogate model on geometry-and-energy performance metrics"
     )
 
     parser.add_argument(
         "--training-csv",
         required=True,
-        help="Path to the geometry-level training CSV"
+        help="Path to the geometry-and-energy training CSV"
     )
 
     parser.add_argument(
@@ -105,7 +106,7 @@ def parse_args():
 
 
 def infer_target_columns(df: pd.DataFrame) -> list[str]:
-    # Use all geometry-level metric columns except the per-metric uncertainty columns.
+    # Use all compact-metric columns except the per-metric uncertainty columns.
     target_columns: list[str] = []
     for column_name in df.columns:
         if column_name in NON_TARGET_COLUMNS or column_name.endswith("_std"):
@@ -113,7 +114,7 @@ def infer_target_columns(df: pd.DataFrame) -> list[str]:
         target_columns.append(column_name)
 
     if not target_columns:
-        raise ValueError("No geometry-level target columns found in training CSV.")
+        raise ValueError("No compact-metric target columns found in training CSV.")
 
     return target_columns
 
@@ -169,7 +170,7 @@ def main():
             loaded_targets = list(loaded_payload.get("target_columns", []))
             if loaded_features and loaded_features != FEATURE_COLUMNS:
                 raise ValueError(
-                    "Loaded model feature columns do not match the geometry-level training schema."
+                    "Loaded model feature columns do not match the compact training schema."
                 )
             if loaded_targets and loaded_targets != target_columns:
                 raise ValueError(

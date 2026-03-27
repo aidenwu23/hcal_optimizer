@@ -5,6 +5,7 @@ Example:
 python3 surrogate/predict_performance.py \
   --model surrogate/model/lgbm_surrogate_NK_0-1.joblib \
   --in-yaml geometries/sweeps/proposed/proposed_1.yaml \
+  --kinetic-energy 1 \
   --out surrogate/csv_data/predictions/proposed_1_predictions.csv \
   --objective-expr "neutron_efficiency + kaon0L_efficiency"
 """
@@ -21,7 +22,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from propose_bo import GEOM_VARS, SURROGATE_FEATURES, SURROGATE_TARGETS, geom_to_surrogate_features
+from propose_bo import GEOM_VARS, SURROGATE_FEATURES, SURROGATE_TARGETS
 
 
 def parse_args() -> argparse.Namespace:
@@ -30,6 +31,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--model", required=True, help="Path to the trained surrogate model bundle.")
     parser.add_argument("--in-yaml", required=True, help="Path to the input sweep YAML.")
+    parser.add_argument(
+        "--kinetic-energy",
+        nargs="+",
+        type=float,
+        required=True,
+        help="Exact kinetic energies in GeV used to expand each geometry into prediction rows.",
+    )
     parser.add_argument("--out", required=True, help="Path to the output prediction CSV.")
     parser.add_argument(
         "--objective-expr",
@@ -101,6 +109,20 @@ def build_geometry_rows(specification: dict[str, Any]) -> list[dict[str, Any]]:
     return geometry_rows
 
 
+def expand_geometry_rows_by_energy(
+    geometry_rows: list[dict[str, Any]],
+    kinetic_energies_gev: list[float],
+) -> list[dict[str, Any]]:
+    # Build one surrogate input row per geometry-and-energy pair.
+    expanded_rows: list[dict[str, Any]] = []
+    for geometry_row in geometry_rows:
+        for kinetic_energy_gev in kinetic_energies_gev:
+            expanded_row = dict(geometry_row)
+            expanded_row["kinetic_energy_GeV"] = float(kinetic_energy_gev)
+            expanded_rows.append(expanded_row)
+    return expanded_rows
+
+
 def safe_eval_expr(expr: str, local_vars: dict[str, object]) -> float:
     return float(eval(expr, {"__builtins__": {}}, local_vars))
 
@@ -115,20 +137,22 @@ def main() -> None:
     model, feature_columns, target_columns = load_model_bundle(model_path)
     specification = load_yaml_object(input_yaml_path)
     geometry_rows = build_geometry_rows(specification)
+    prediction_rows = expand_geometry_rows_by_energy(geometry_rows, args.kinetic_energy)
 
-    X_geom = np.array(
-        [[float(row[column_name]) for column_name in GEOM_VARS] for row in geometry_rows],
-        dtype=float,
-    )
-    Xs = geom_to_surrogate_features(
-        X_geom=X_geom,
-        geom_var_names=GEOM_VARS,
-        feature_columns=feature_columns,
-        fixed_features={},
-    )
+    # Build one feature row per geometry-and-energy pair in the saved model feature order.
+    feature_rows: list[dict[str, float]] = []
+    for prediction_row in prediction_rows:
+        feature_row: dict[str, float] = {}
+        for feature_name in feature_columns:
+            if feature_name == "kinetic_energy_GeV":
+                feature_row[feature_name] = float(prediction_row["kinetic_energy_GeV"])
+            elif feature_name in GEOM_VARS:
+                feature_row[feature_name] = float(prediction_row[feature_name])
+            else:
+                raise ValueError(f"Cannot build prediction rows for unknown surrogate feature {feature_name!r}.")
+        feature_rows.append(feature_row)
 
-    # Predict feature columns.
-    Xs_df = pd.DataFrame(Xs, columns=feature_columns)
+    Xs_df = pd.DataFrame(feature_rows, columns=feature_columns)
     Y = np.asarray(model.predict(Xs_df))
     if Y.ndim != 2 or Y.shape[1] != len(target_columns):
         raise ValueError(
@@ -136,9 +160,10 @@ def main() -> None:
         )
 
     output_rows: list[dict[str, object]] = []
-    for row_index, geometry_row in enumerate(geometry_rows):
+    for row_index, geometry_row in enumerate(prediction_rows):
         output_row: dict[str, object] = {
             "tag": geometry_row["tag"],
+            "kinetic_energy_GeV": float(geometry_row["kinetic_energy_GeV"]),
         }
         for column_name in GEOM_VARS:
             if "layers" in column_name:
@@ -151,7 +176,7 @@ def main() -> None:
             output_row["predicted_objective"] = safe_eval_expr(args.objective_expr, output_row)
         output_rows.append(output_row)
 
-    fieldnames = ["tag", *GEOM_VARS, *target_columns]
+    fieldnames = ["tag", "kinetic_energy_GeV", *GEOM_VARS, *target_columns]
     if args.objective_expr:
         fieldnames.append("predicted_objective")
 

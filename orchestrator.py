@@ -27,6 +27,7 @@ import subprocess
 from pathlib import Path
 
 import pandas as pd
+import yaml
 
 
 def run_cmd(cmd: list[str]) -> None:
@@ -37,6 +38,27 @@ def run_cmd(cmd: list[str]) -> None:
 
 def safe_eval_expr(expr: str, local_vars: dict[str, object]) -> float:
     return float(eval(expr, {"__builtins__": {}}, local_vars))
+
+
+def parse_energy_spectrum(spec_path: Path) -> tuple[list[float], list[float]]:
+    # Read the exact kinetic-energy points and weights used for BO scoring.
+    with spec_path.open("r", encoding="utf-8") as input_file:
+        spec = yaml.safe_load(input_file) or {}
+
+    energy_spectrum = spec.get("energy_spectrum", {}) or {}
+    if not isinstance(energy_spectrum, dict):
+        raise ValueError("'energy_spectrum' must be a mapping in the BO spec.")
+
+    energy_values = energy_spectrum.get("kinetic_energy_GeV", [1.0])
+    weight_values = energy_spectrum.get("weights", [1.0])
+    if not isinstance(energy_values, list) or not isinstance(weight_values, list):
+        raise ValueError("'energy_spectrum.kinetic_energy_GeV' and 'energy_spectrum.weights' must be lists.")
+    if len(energy_values) != len(weight_values):
+        raise ValueError("'energy_spectrum.kinetic_energy_GeV' and 'energy_spectrum.weights' must have the same length.")
+    if not energy_values:
+        raise ValueError("'energy_spectrum.kinetic_energy_GeV' must not be empty.")
+
+    return [float(value) for value in energy_values], [float(value) for value in weight_values]
 
 
 def ensure_processed_root(processed_root: Path | None) -> Path:
@@ -91,34 +113,79 @@ def propose_next_geometries(
     ])
 
 
-def select_best_observed_geometry(training_csv: Path, objective_expr: str, output_csv: Path) -> None:
+def select_best_observed_geometry(
+    training_csv: Path,
+    objective_expr: str,
+    spec_path: Path,
+    output_csv: Path,
+) -> None:
     df = pd.read_csv(training_csv)
-    scores = []
-    # Loop through rows and find the one with the highest objective_expr value.
-    for _, row in df.iterrows():
-        row_values = row.to_dict()
-        try:
-            scores.append(safe_eval_expr(objective_expr, row_values))
-        except Exception as error:
-            raise ValueError(
-                f"Failed to evaluate best-objective expression {objective_expr!r} "
-                f"against the geometry-level training CSV."
-            ) from error
+    if "geometry_id" not in df.columns or "kinetic_energy_GeV" not in df.columns:
+        raise ValueError("Compact training CSV must contain geometry_id and kinetic_energy_GeV.")
 
-    max_row = df.loc[pd.Series(scores).idxmax()]
+    spectrum_energies, spectrum_weights = parse_energy_spectrum(spec_path)
+    energy_weight_map = {
+        round(float(energy_value), 12): float(weight_value)
+        for energy_value, weight_value in zip(spectrum_energies, spectrum_weights)
+    }
+
+    # Score each observed geometry by summing its weighted per-energy objective rows.
+    best_geometry_id = None
+    best_geometry_score = None
+    best_geometry_rows = None
+    # Evaluate one aggregated BO-spectrum score for each observed geometry.
+    for geometry_id, geometry_df in df.groupby("geometry_id", sort=False):
+        geometry_scores = []
+        observed_energy_map: dict[float, float] = {}
+        # Keep only the per-energy rows that belong to the BO spectrum.
+        for _, row in geometry_df.iterrows():
+            energy_key = round(float(row["kinetic_energy_GeV"]), 12)
+            if energy_key not in energy_weight_map:
+                continue
+            row_values = row.to_dict()
+            try:
+                row_score = safe_eval_expr(objective_expr, row_values)
+            except Exception as error:
+                raise ValueError(
+                    f"Failed to evaluate best-objective expression {objective_expr!r} "
+                    f"against the geometry-and-energy training CSV."
+                ) from error
+            observed_energy_map[energy_key] = row_score
+
+        # Skip geometries that do not cover every energy required by the BO spectrum.
+        if len(observed_energy_map) != len(energy_weight_map):
+            continue
+
+        # Collapse the per-energy objective rows into one weighted geometry score.
+        for energy_key, weight_value in energy_weight_map.items():
+            geometry_scores.append(weight_value * observed_energy_map[energy_key])
+
+        geometry_score = sum(geometry_scores)
+        # Keep the best geometry and the rows that contributed to its aggregated score.
+        if best_geometry_score is None or geometry_score > best_geometry_score:
+            best_geometry_id = geometry_id
+            best_geometry_score = geometry_score
+            best_geometry_rows = geometry_df[geometry_df["kinetic_energy_GeV"].round(12).isin(energy_weight_map.keys())].copy()
+
+    if best_geometry_rows is None or best_geometry_id is None or best_geometry_score is None:
+        raise ValueError("No observed geometry covers the full BO energy_spectrum.")
+
+    best_geometry_rows["aggregated_objective"] = best_geometry_score
     output_csv.parent.mkdir(parents=True, exist_ok=True)
-    max_row.to_frame().T.to_csv(output_csv, index=False)
+    best_geometry_rows.to_csv(output_csv, index=False)
     print("Best geometry configuration saved to:", output_csv)
     print("Best objective expression:", objective_expr)
-    print(max_row)
+    print("Best geometry_id:", best_geometry_id)
+    print("Aggregated objective:", best_geometry_score)
+    print(best_geometry_rows)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Refresh the geometry-level surrogate model and write the next BO sweep."
+        description="Refresh the geometry-and-energy surrogate model and write the next BO sweep."
     )
     parser.add_argument("--processed-root", default=None, help="Path to hcal_optimizer/data/processed.")
-    parser.add_argument("--training-csv", required=True, help="Geometry-level training CSV path.")
+    parser.add_argument("--training-csv", required=True, help="Geometry-and-energy training CSV path.")
     parser.add_argument("--run-level-csv", default=None, help="Run-level observed-results CSV path.")
     parser.add_argument("--model", required=True, help="Path to write the surrogate model bundle.")
     parser.add_argument("--bo-spec", default="geometries/sweeps/bo_spec.yaml", help="Path to bo_spec.yaml.")
@@ -134,7 +201,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--best-objective",
         default="neutron_efficiency + kaon0L_efficiency",
-        help="Geometry-level objective expression used to select the best observed geometry.",
+        help="Per-energy objective expression used to select the best observed geometry.",
     )
     parser.add_argument(
         "--best-observed-csv",
@@ -145,7 +212,7 @@ def parse_args() -> argparse.Namespace:
 
 
 # In repeated runs, this script does the following:
-# Rebuild the observed geometry-level training file from processed results when needed.
+# Rebuild the observed geometry-and-energy training file from processed results when needed.
 # Fit the surrogate using that training file when needed.
 # Propose a new batch of geometries.
 # ... run conductor.py separately on the proposed geometries ...
@@ -183,7 +250,7 @@ def main() -> None:
             )
 
     if not geometry_training_csv.exists():
-        raise FileNotFoundError(f"Geometry-level training CSV not found: {geometry_training_csv}")
+        raise FileNotFoundError(f"Geometry-and-energy training CSV not found: {geometry_training_csv}")
 
     if args.overwrite or not model_path.exists():
         train_surrogate_model(geometry_training_csv, model_path)
@@ -205,6 +272,7 @@ def main() -> None:
     select_best_observed_geometry(
         training_csv=geometry_training_csv,
         objective_expr=args.best_objective,
+        spec_path=spec_path,
         output_csv=best_observed_csv,
     )
 

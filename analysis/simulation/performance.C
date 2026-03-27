@@ -124,8 +124,8 @@ void performance(const char* events_path_cstr, const char* meta_path_cstr = "",
     std::cerr << "[performance] meta.json is missing gun_particle.\n";
     return;
   }
-  if (!meta_json.contains("gun_energy_GeV") || !meta_json["gun_energy_GeV"].is_number()) {
-    std::cerr << "[performance] meta.json is missing gun_energy_GeV.\n";
+  if (!meta_json.contains("total_energy_GeV") || !meta_json["total_energy_GeV"].is_number()) {
+    std::cerr << "[performance] meta.json is missing total_energy_GeV.\n";
     return;
   }
   if (!calibration_json.contains("muon_threshold_GeV") || !calibration_json["muon_threshold_GeV"].is_number()) {
@@ -135,7 +135,7 @@ void performance(const char* events_path_cstr, const char* meta_path_cstr = "",
 
   const std::string geometry_id = meta_json["geometry_id"].get<std::string>();
   const std::string gun_particle = meta_json["gun_particle"].get<std::string>();
-  const double gun_energy_GeV = meta_json["gun_energy_GeV"].get<double>();
+  const double total_energy_GeV = meta_json["total_energy_GeV"].get<double>();
   const double muon_threshold_GeV = calibration_json["muon_threshold_GeV"].get<double>();
   const bool has_response_scale =
       calibration_json.contains("response_scale") && calibration_json["response_scale"].is_number();
@@ -196,7 +196,7 @@ void performance(const char* events_path_cstr, const char* meta_path_cstr = "",
     }
 
     const double mc_energy_GeV = static_cast<double>(mc_E);
-    if (mc_energy_GeV <= 0.0 || gun_energy_GeV <= 0.0) {
+    if (mc_energy_GeV <= 0.0 || total_energy_GeV <= 0.0) {
       continue;
     }
 
@@ -215,7 +215,10 @@ void performance(const char* events_path_cstr, const char* meta_path_cstr = "",
   nlohmann::json output;
   output["geometry_id"] = geometry_id;
   output["gun_particle"] = gun_particle;
-  output["gun_energy_GeV"] = gun_energy_GeV;
+  if (meta_json.contains("kinetic_energy_GeV")) {
+    output["kinetic_energy_GeV"] = meta_json["kinetic_energy_GeV"];
+  }
+  output["total_energy_GeV"] = total_energy_GeV;
   output["muon_threshold_GeV"] = muon_threshold_GeV;
   output["response_scale"] = has_response_scale ? nlohmann::json(response_scale) : nlohmann::json(nullptr);
   output["valid_event_count"] = stats.valid_event_count;
@@ -233,7 +236,7 @@ void performance(const char* events_path_cstr, const char* meta_path_cstr = "",
     output["eff_hi"] = nullptr;
   }
 
-  if (has_response_scale && stats.detected_event_count > 1 && gun_energy_GeV > 0.0) {
+  if (has_response_scale && stats.detected_event_count > 1 && total_energy_GeV > 0.0) {
     const double mean_reconstructed_energy_GeV =
         stats.reco_energy_sum / static_cast<double>(stats.detected_event_count);
     double variance =
@@ -242,7 +245,7 @@ void performance(const char* events_path_cstr, const char* meta_path_cstr = "",
     if (variance < 0.0) {
       variance = 0.0;
     }
-    output["energy_resolution"] = std::sqrt(variance) / gun_energy_GeV;
+    output["energy_resolution"] = std::sqrt(variance) / total_energy_GeV;
   } else {
     output["energy_resolution"] = nullptr;
   }

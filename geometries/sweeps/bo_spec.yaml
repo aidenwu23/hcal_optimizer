@@ -39,11 +39,15 @@ fixed_features:
   seg2_layers: 3
   seg3_layers: 4
 
+energy_spectrum:
+  kinetic_energy_GeV: [1.0]
+  weights: [1.0]
+
 constraints:
   # Constraints on surrogate outputs
   predicted:
-    - "neutron_energy_resolution <= 0.50"
-    - "kaon0L_energy_resolution <= 0.50"
+    - "neutron_energy_resolution <= 1.0"
+    - "kaon0L_energy_resolution <= 1.0"
 
 scoring:
   mode: "tradeoff"   # metric | tradeoff

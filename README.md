@@ -2,6 +2,13 @@
 
 Geometry optimizer for a segmented backward-facing hadronic calorimeter (HCal). Uses Geant4 simulations via DD4hep/ddsim to evaluate candidate geometries, trains a LightGBM surrogate on the observed results, and uses Bayesian optimization to propose improved geometry candidates. The objective is to maximize combined neutron and kaon0L detection efficiency subject to energy resolution constraints.
 
+## Notes and Assumptions
+
+- Run metadata and raw CSVs store both `kinetic_energy_GeV` and `total_energy_GeV`.
+- Compact training CSVs are keyed by `(geometry_id, kinetic_energy_GeV)`.
+- BO scoring is evaluated across exact `kinetic_energy_GeV` points from `geometries/sweeps/bo_spec.yaml`.
+- Energy resolution is normalized to `total_energy_GeV` for now.
+
 ## Setup
 
 **Prerequisites:** DD4hep, Geant4, ROOT, EDM4hep/podio, CMake ≥ 3.16. These are managed via Spack.
@@ -73,17 +80,18 @@ The detector is a 10-layer segmented HCal with three longitudinal segments. The 
 Fixed parameters: segment layer counts (3 / 3 / 4), spacer thickness (0.05 cm, Air), transverse dimensions (100 × 100 cm), front face position (−20 cm).
 
 **BO objective:** maximize `neutron_efficiency + kaon0L_efficiency`
-**BO constraints:** `neutron_energy_resolution <= 0.50`, `kaon0L_energy_resolution <= 0.50`
+**BO constraints:** `neutron_energy_resolution <= 1.0`, `kaon0L_energy_resolution <= 1.0`
 
 ## CSV reference
 
-### Compact (geometry-level) CSV
+### Compact (geometry-and-energy) CSV
 
-One row per geometry, averaged across seeds and energies.
+One row per `(geometry_id, kinetic_energy_GeV)`, averaged across repeated runs at the same geometry, energy, and particle.
 
 ```
 | Column                             | Description                                   |
 | `geometry_id`                      | 8-character hash of the parameter set         |
+| `kinetic_energy_GeV`               | Shared energy axis used by the surrogate      |
 | `nLayers`                          | Total layer count                             |
 | `seg{1,2,3}_layers`                | Layers per segment                            |
 | `t_absorber_seg{1,2,3}`            | Absorber thickness per segment (cm)           | 
@@ -97,13 +105,14 @@ One row per geometry, averaged across seeds and energies.
 
 ### Raw (run-level) CSV
 
-One row per (geometry, particle, seed) combination.
+One row per `(geometry, particle, kinetic_energy_GeV, seed)` combination.
 ```
 | Column                 | Description                     |
 | `geometry_id`          | Geometry hash                   |
 | `run_id`               | Unique run identifier           |
 | `gun_particle`         | Simulated particle species      |
-| `gun_energy_GeV`       | Total gun energy                |
+| `kinetic_energy_GeV`   | Gun kinetic energy              |
+| `total_energy_GeV`     | Gun total energy                |
 | `muon_threshold_GeV`   | Applied detection threshold     |
 | `detection_efficiency` | Per-run detection efficiency    |
 | `energy_resolution`    | Per-run energy resolution       |

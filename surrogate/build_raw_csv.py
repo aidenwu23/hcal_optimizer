@@ -8,7 +8,7 @@
 #
 # Output columns: geometry_id, run_id, gun_particle, nLayers, seg1_layers, seg2_layers, seg3_layers,
 #   t_absorber_seg1/2/3, t_scin_seg1/2/3, t_spacer,
-#   gun_energy_GeV, muon_threshold_GeV,
+#   kinetic_energy_GeV, total_energy_GeV, muon_threshold_GeV,
 #   detection_efficiency, energy_resolution
 """
 python3 surrogate/build_raw_csv.py \
@@ -58,7 +58,8 @@ def _extract(meta_p: Path, calibration_p: Path, perf_p: Path, geometry_root: Pat
         "t_scin_seg3":          geom_params.get("t_scin_seg3"),
         "t_spacer":             geom_params.get("t_spacer"),
         # Beam and threshold config
-        "gun_energy_GeV":       meta.get("gun_energy_GeV"),
+        "kinetic_energy_GeV":   meta.get("kinetic_energy_GeV"),
+        "total_energy_GeV":     meta.get("total_energy_GeV"),
         "muon_threshold_GeV":   calibration.get("muon_threshold_GeV"),
         # Performance metrics
         "detection_efficiency": perf.get("detection_efficiency"),
@@ -110,7 +111,7 @@ def main():
         "t_absorber_seg1", "t_absorber_seg2", "t_absorber_seg3",
         "t_scin_seg1", "t_scin_seg2", "t_scin_seg3",
         "t_spacer",
-        "gun_energy_GeV", "muon_threshold_GeV",
+        "kinetic_energy_GeV", "total_energy_GeV", "muon_threshold_GeV",
         "detection_efficiency",
         "energy_resolution",
     ]

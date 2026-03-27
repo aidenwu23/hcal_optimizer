@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Compact a run-level surrogate training CSV into one row per geometry.
+Compact a run-level surrogate training CSV into one row per geometry and kinetic energy.
 Example:
 python3 surrogate/compact_training_csv.py \
-  --in surrogate/csv_data/training_raw/training_NK_raw_2.csv \
-  --out surrogate/csv_data/training_compact/training_NK_compact_2.csv
+  --in surrogate/csv_data/training_raw/training_NK_raw_0.csv \
+  --out surrogate/csv_data/training_compact/training_NK_compact_0.csv
 
 python3 surrogate/compact_training_csv.py \
   --in csv_data/results_raw.csv \
@@ -34,9 +34,12 @@ GEOMETRY_FEATURES = [
     "t_spacer",
 ]
 
+# Kinetic energy is used as the row identity. 
+ENERGY_COLUMN = "kinetic_energy_GeV"
+
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Compact a run-level surrogate training CSV into one geometry-level row."
+        description="Compact a run-level surrogate training CSV into one geometry-and-energy row."
     )
     parser.add_argument(
         "--in",
@@ -47,7 +50,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--out",
         required=True,
-        help="Output geometry-level compact CSV path.",
+        help="Output geometry-and-energy compact CSV path.",
     )
     return parser.parse_args()
 
@@ -108,8 +111,15 @@ def build_particle_column_map(particle_names: list[str]) -> dict[str, str]:
     return column_map
 
 
+def normalize_energy_value(energy_text: str) -> float:
+    parsed_energy = parse_float(energy_text)
+    if parsed_energy is None:
+        raise ValueError(f"Encountered a row with an invalid {ENERGY_COLUMN}: {energy_text!r}.")
+    return parsed_energy
+
+
 def main() -> int:
-    # Collapse the run-level CSV into one geometry-level row with per-particle metrics.
+    # Collapse the run-level CSV into one geometry-and-energy row with per-particle metrics.
     arguments = parse_arguments()
     input_path = Path(arguments.input_csv).expanduser().resolve()
     output_path = Path(arguments.out).expanduser().resolve()
@@ -125,6 +135,7 @@ def main() -> int:
         required_columns = [
             "geometry_id",
             "gun_particle",
+            ENERGY_COLUMN,
             "detection_efficiency",
             "energy_resolution",
             *GEOMETRY_FEATURES,
@@ -135,34 +146,37 @@ def main() -> int:
         if missing_required_columns:
             raise ValueError(f"{input_path} is missing required columns: {missing_required_columns}")
 
-        rows_by_geometry: dict[str, list[dict[str, str]]] = defaultdict(list)
+        rows_by_geometry_energy: dict[tuple[str, float], list[dict[str, str]]] = defaultdict(list)
         particle_names: set[str] = set()
         for row in reader:
             geometry_id = row.get("geometry_id", "").strip()
             if not geometry_id:
                 raise ValueError("Encountered a row with an empty geometry_id.")
+            kinetic_energy_gev = normalize_energy_value(row.get(ENERGY_COLUMN, ""))
             particle_name = normalize_particle_name(row.get("gun_particle", ""))
             if not particle_name:
                 raise ValueError(f"Encountered a row with an empty gun_particle for geometry_id={geometry_id}.")
             particle_names.add(particle_name)
-            rows_by_geometry[geometry_id].append(row)
+            rows_by_geometry_energy[(geometry_id, kinetic_energy_gev)].append(row)
 
     ordered_particle_names = sorted(particle_names)
     particle_column_map = build_particle_column_map(ordered_particle_names)
     output_rows: list[dict[str, object]] = []
-    # Build one output row per geometry.
-    for geometry_id in sorted(rows_by_geometry):
-        geometry_rows = rows_by_geometry[geometry_id]
-        reference_row = geometry_rows[0]
+
+    # Build one output row per geometry-and-energy pair.
+    for geometry_id, kinetic_energy_gev in sorted(rows_by_geometry_energy):
+        geometry_energy_rows = rows_by_geometry_energy[(geometry_id, kinetic_energy_gev)]
+        reference_row = geometry_energy_rows[0]
         output_row: dict[str, object] = {
             "geometry_id": geometry_id,
+            ENERGY_COLUMN: kinetic_energy_gev,
         }
         for column_name in GEOMETRY_FEATURES:
             output_row[column_name] = reference_row.get(column_name, "")
 
-        # Split this geometry's rows by particle before averaging the metrics.
+        # Split this geometry-and-energy slice by particle before averaging the metrics.
         rows_by_particle: dict[str, list[dict[str, str]]] = defaultdict(list)
-        for row in geometry_rows:
+        for row in geometry_energy_rows:
             particle_name = normalize_particle_name(row.get("gun_particle", ""))
             rows_by_particle[particle_name].append(row)
 
@@ -192,6 +206,7 @@ def main() -> int:
 
     fieldnames = [
         "geometry_id",
+        ENERGY_COLUMN,
         *GEOMETRY_FEATURES,
     ]
     for particle_name in ordered_particle_names:
@@ -212,7 +227,7 @@ def main() -> int:
         for row in output_rows:
             writer.writerow(row)
 
-    print(f"Wrote {len(output_rows)} geometry rows -> {output_path}")
+    print(f"Wrote {len(output_rows)} geometry-energy rows -> {output_path}")
     return 0
 
 

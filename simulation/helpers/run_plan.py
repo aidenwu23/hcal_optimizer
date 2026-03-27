@@ -79,7 +79,8 @@ def lookup_rest_mass_gev(particle: str) -> Optional[float]:
 class RunPlan:
     geometry_variant: GeometryVariant
     gun_particle: str
-    gun_energy_GeV: float
+    kinetic_energy_GeV: Optional[float]
+    total_energy_GeV: float
     gun_direction: str
     gun_position: str
     seed: Optional[int]
@@ -154,14 +155,18 @@ def build_run_plans(
         # Sweep over every requested particle
         for particle in requested_particles:
             expected_pdg = lookup_pdg(particle)
-            rest_mass_gev = None
+            rest_mass_gev = lookup_rest_mass_gev(particle)
             if use_kinetic_energy:
-                rest_mass_gev = lookup_rest_mass_gev(particle)
                 if rest_mass_gev is None:
                     raise ValueError(f"No rest mass configured for particle '{particle}' used with --gun-kinetic-energy.")
             # Per particle, sweep all requested energies
             for energy in energy_values:
-                total_energy_gev = energy + rest_mass_gev if rest_mass_gev is not None else energy
+                if use_kinetic_energy:
+                    kinetic_energy_gev = energy
+                    total_energy_gev = energy + rest_mass_gev
+                else:
+                    kinetic_energy_gev = None if rest_mass_gev is None else energy - rest_mass_gev
+                    total_energy_gev = energy
                 # Per energy, sweep every requested seed value
                 for seed in seed_values:
                     run_id, run_id_int = compute_run_id(
@@ -179,7 +184,8 @@ def build_run_plans(
                         RunPlan(
                             geometry_variant=geometry_variant,
                             gun_particle=particle,
-                            gun_energy_GeV=total_energy_gev,
+                            kinetic_energy_GeV=kinetic_energy_gev,
+                            total_energy_GeV=total_energy_gev,
                             gun_direction=gun_direction,
                             gun_position=gun_position,
                             seed=seed,

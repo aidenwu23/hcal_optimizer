@@ -1,5 +1,5 @@
-name: control
-tag_prefix: control
+name: bhcal
+tag_prefix: bhcal_2x_scint
 template: geometries/templates/hcal_template.xml
 detector_type: hcal
 index_base: 0
@@ -16,10 +16,10 @@ constants:
   seg2_layers: 3
   seg3_layers: 4
 variants:
-- tag: control
-  t_absorber_seg1: 3.93
-  t_scin_seg1: 0.53
-  t_absorber_seg2: 3.93
-  t_scin_seg2: 0.53
-  t_absorber_seg3: 3.93
-  t_scin_seg3: 0.53
+- tag: bhcal_2x_scint
+  t_absorber_seg1: 4
+  t_scin_seg1: 0.8
+  t_absorber_seg2: 4
+  t_scin_seg2: 0.8
+  t_absorber_seg3: 4
+  t_scin_seg3: 0.8

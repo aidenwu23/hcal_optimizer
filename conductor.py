@@ -18,7 +18,7 @@ python3 conductor.py --spec geometries/sweeps/proposed/proposed_1.yaml \
   --gun-kinetic-energy 1 \
   --seeds 67 --delete-intermediates
 
-python3 conductor.py --spec geometries/sweeps/bhcal.yaml \
+python3 conductor.py --spec geometries/sweeps/runs/full_run.yaml \
   --muon-threshold 0.02 \
   --events 3000 \
   --gun-particle neutron kaon0L \

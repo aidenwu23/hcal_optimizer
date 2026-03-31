@@ -17,7 +17,7 @@ python3 surrogate/build_raw_csv.py \
 
 python3 surrogate/build_raw_csv.py \
   --processed-root data/processed \
-  --out csv_data/results_raw.csv
+  --out surrogate/csv_data/control.csv
 """
 
 import argparse, json

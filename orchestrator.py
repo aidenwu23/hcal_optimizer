@@ -14,10 +14,7 @@ python3 orchestrator.py \
   --pool 20000 \
   --bo-variants 5 \
   --seed 10 \
-  --processed-root data/processed \
-  --overwrite
-
-Don't use overwrite if you already have the training CSV you want to reuse.
+  --processed-root data/processed
 """
 
 from __future__ import annotations
@@ -194,11 +191,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bo-variants", type=int, default=5, help="Number of BO variants to output.")
     parser.add_argument("--seed", type=int, default=0, help="Random seed for candidate sampling.")
     parser.add_argument(
-        "--overwrite",
-        action="store_true",
-        help="Rebuild training CSV artifacts from processed results and retrain the model even if outputs already exist.",
-    )
-    parser.add_argument(
         "--best-objective",
         default="neutron_efficiency + kaon0L_efficiency",
         help="Per-energy objective expression used to select the best observed geometry.",
@@ -234,9 +226,9 @@ def main() -> None:
     sweep_yaml = Path(args.sweep_yaml)
     best_observed_csv = Path(args.best_observed_csv)
 
-    # Rebuild the training.csv and retrain the model if overwrite.
-    if args.overwrite or not geometry_training_csv.exists():
-        if not args.overwrite and run_level_csv.exists():
+    # Rebuild the training CSV only when it does not already exist.
+    if not geometry_training_csv.exists():
+        if run_level_csv.exists():
             run_cmd([
                 "python3", "surrogate/compact_training_csv.py",
                 "--in", str(run_level_csv),
@@ -252,7 +244,7 @@ def main() -> None:
     if not geometry_training_csv.exists():
         raise FileNotFoundError(f"Geometry-and-energy training CSV not found: {geometry_training_csv}")
 
-    if args.overwrite or not model_path.exists():
+    if not model_path.exists():
         train_surrogate_model(geometry_training_csv, model_path)
 
     if not model_path.exists():

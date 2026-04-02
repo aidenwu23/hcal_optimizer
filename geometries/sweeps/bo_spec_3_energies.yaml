@@ -1,0 +1,62 @@
+# hcal_optimizer/sweeps/spectrum_bo_spec.yaml
+
+# This block is copied into the output sweep YAML (except variants, which are filled in)
+sweep_base:
+  name: sweep_bo
+  tag_prefix: bo
+  template: geometries/templates/hcal_template.xml
+  detector_type: hcal
+  index_base: 0
+  outdir_generated: geometries/generated
+
+  # Defaults applied to every variant; variants will override only what we set
+  constants:
+    side: -z
+    dx: 100/2*cm
+    dy: 100/2*cm
+    zmin: 0.20*m
+    nLayers: 10
+    t_spacer: 0.05*cm
+    spacerMaterial: Air
+    seg1_layers: 3
+    seg2_layers: 3
+    seg3_layers: 4
+
+# Geometry variables proposed by BO.
+# Geometry-space thickness units here are cm.
+bounds:
+  t_absorber_seg1: {low: 3.5, high: 4.5, type: float}
+  t_absorber_seg2: {low: 3.5, high: 4.5, type: float}
+  t_absorber_seg3: {low: 3.5, high: 4.5, type: float}
+
+  t_scin_seg1: {low: 0.3, high: 0.6, type: float}
+  t_scin_seg2: {low: 0.3, high: 0.6, type: float}
+  t_scin_seg3: {low: 0.3, high: 0.6, type: float}
+
+# Fixed surrogate inputs that are not part of the geometry proposal
+fixed_features:
+  seg1_layers: 3
+  seg2_layers: 3
+  seg3_layers: 4
+
+energy_spectrum:
+  kinetic_energy_GeV: [1.0, 2.0, 3.0]
+  weights: [0.72, 0.25, 0.03]
+
+constraints:
+  # Constraints on surrogate outputs
+  predicted:
+    - "neutron_energy_resolution <= 1.0"
+    - "kaon0L_energy_resolution <= 1.0"
+
+scoring:
+  mode: "tradeoff"   # metric | tradeoff
+  expr: "neutron_efficiency + kaon0L_efficiency"
+  maximize: true
+
+  # Example if you want a tradeoff instead:
+  # expr: "neutron_efficiency + kaon0L_efficiency - neutron_energy_resolution - kaon0L_energy_resolution"
+  # maximize: true
+
+diversity:
+  min_l2_norm: 0.05

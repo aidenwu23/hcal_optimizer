@@ -5,11 +5,12 @@ Geometry optimizer for a generic layered calorimeter (HCal). Uses Geant4 simulat
 ## Current results:
 ### Geometry IDs and identification
 Each geometry has 10 total layers divided into 3 segments, with 3/3/4 layers in the front/middle/back segments.
-
-Best geometry converging after 3 iterations from 1 GeV evaluated at 1-3 GeV: c2bbd5d3
-Best geometry converging after 2 iterations from 1-3 GeV evaluated at 1-3 GeV: 57fc2ba4
-Baseline uniform nHCal evaluated at 1-3 GeV: 04e3fdfb
-
+```
+        | Trained energy range | Iterations of BO | Notes
+04e3fdfb| N/A                  | N/A              | nHCal
+c2bbd5d3| 1 GeV                | 3                | Converged
+57fc2ba4| 1-3 GeV              | 2                | Converged
+```
 Results are computed using average across 3000 events * 3 different seeds
 
 ### Three geometries and their thicknesses (cm)

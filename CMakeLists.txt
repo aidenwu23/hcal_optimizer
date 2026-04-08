@@ -22,7 +22,7 @@ if(BUILD_PROCESSOR)
   find_package(EDM4HEP REQUIRED)
   find_package(podio REQUIRED COMPONENTS podioRootIO)
 
-  add_executable(process processing/processor.cc)
+  add_executable(process simulation/processing/processor.cc)
   target_compile_features(process PRIVATE cxx_std_20)
   target_link_libraries(process
     PRIVATE

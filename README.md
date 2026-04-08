@@ -174,7 +174,7 @@ hcal_optimizer/
 --> simulation/
     --> calibration/          # Muon threshold and particle response calibration scripts
     --> helpers/              # Geometry indexing, run planning, and execution steps
---> processing/               # C++ EDM4hep event processor
+    --> processing/           # C++ event reduction and performance macros
 --> analysis/
     --> geometry/             # Geometry comparison tools
     --> result_validation/    # Efficiency-vs-threshold scanning and validation

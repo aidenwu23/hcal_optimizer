@@ -1,7 +1,7 @@
 /*
-Build MIP-based segment thresholds from a processed muon events.root file.
+Write segment Landau-fit histograms from a muon control events.root file.
 Example:
-root -l -b -q 'simulation/calibration/calibrate_MIP.C("data/processed/04e3fdfb/run_mu_ctrl/events.root","data/processed/04e3fdfb/run_mu_ctrl/calibration.json",0.5)'
+root -l -b -q 'analysis/simulation/plot_landau.C("data/processed/04e3fdfb/run_mu_ctrl/events.root","landau_plots.root")'
 */
 
 #include <TFile.h>
@@ -10,12 +10,10 @@ root -l -b -q 'simulation/calibration/calibrate_MIP.C("data/processed/04e3fdfb/r
 #include <TTree.h>
 
 #include <algorithm>
-#include <nlohmann/json.hpp>
-
 #include <array>
 #include <cmath>
-#include <fstream>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -34,6 +32,14 @@ int layer_to_segment(int layer_index) {
     return 1;
   }
   return 2;
+}
+
+std::string sibling_path(const std::string& path, const std::string& basename) {
+  const auto separator_index = path.find_last_of("/\\");
+  if (separator_index == std::string::npos) {
+    return basename;
+  }
+  return path.substr(0, separator_index + 1) + basename;
 }
 
 double peak_bin_center(const TH1D& histogram) {
@@ -68,54 +74,30 @@ double histogram_xmax(const std::vector<double>& values) {
   return x_max;
 }
 
-double estimate_mpv(TH1D& histogram) {
-  const double fallback_mpv = peak_bin_center(histogram);
-  if (!(fallback_mpv > 0.0)) {
-    return 0.0;
-  }
-
-  TF1 landau_fit("landau_fit", "landau", 0.0, histogram.GetXaxis()->GetXmax());
-  landau_fit.SetParameters(histogram.GetMaximum(), fallback_mpv, std::max(1e-6, fallback_mpv * 0.25));
-  const int fit_status = histogram.Fit(&landau_fit, "Q0");
-  const double fitted_mpv = landau_fit.GetParameter(1);
-  if (fit_status == 0 && std::isfinite(fitted_mpv) && fitted_mpv >= 0.0) {
-    return fitted_mpv;
-  }
-  return fallback_mpv;
-}
-
 }  // namespace
 
-void calibrate_MIP(const char* events_path_cstr,
-                   const char* out_json_path_cstr,
-                   double alpha = 0.5) {
-  // Validate the runtime inputs before reading files.
+void plot_landau(const char* events_path_cstr, const char* out_path_cstr = "") {
   if (!events_path_cstr || std::string(events_path_cstr).empty()) {
-    std::cerr << "[calibrate_MIP] events.root path is required.\n";
-    return;
-  }
-  if (!out_json_path_cstr || std::string(out_json_path_cstr).empty()) {
-    std::cerr << "[calibrate_MIP] Output json path is required.\n";
-    return;
-  }
-  if (alpha < 0.0 || !std::isfinite(alpha)) {
-    std::cerr << "[calibrate_MIP] alpha must be finite and non-negative.\n";
+    std::cerr << "[plot_landau] events.root path is required.\n";
     return;
   }
 
   const std::string events_path(events_path_cstr);
-  const std::string out_json_path(out_json_path_cstr);
+  const std::string out_path =
+      (out_path_cstr && std::string(out_path_cstr).size())
+          ? std::string(out_path_cstr)
+          : sibling_path(events_path, "landau_plots.root");
 
   TFile input_file(events_path.c_str(), "READ");
   if (input_file.IsZombie()) {
-    std::cerr << "[calibrate_MIP] Failed to open " << events_path << ".\n";
+    std::cerr << "[plot_landau] Failed to open " << events_path << ".\n";
     return;
   }
 
   TTree* tree = nullptr;
   input_file.GetObject("events", tree);
   if (!tree) {
-    std::cerr << "[calibrate_MIP] Tree 'events' not found in " << events_path << ".\n";
+    std::cerr << "[plot_landau] Tree 'events' not found in " << events_path << ".\n";
     return;
   }
 
@@ -123,7 +105,7 @@ void calibrate_MIP(const char* events_path_cstr,
   for (int layer_index = 0; layer_index < kLayerCount; ++layer_index) {
     const std::string branch_name = "layer_" + std::to_string(layer_index) + "_E";
     if (tree->GetBranch(branch_name.c_str()) == nullptr) {
-      std::cerr << "[calibrate_MIP] Branch '" << branch_name << "' not found in "
+      std::cerr << "[plot_landau] Branch '" << branch_name << "' not found in "
                 << events_path << ".\n";
       return;
     }
@@ -161,6 +143,7 @@ void calibrate_MIP(const char* events_path_cstr,
       TH1D("h_seg2_mip", "Segment 2 muon layer deposits;Layer energy [GeV];Layer count", kEnergyBinCount, 0.0, segment_xmax[1]),
       TH1D("h_seg3_mip", "Segment 3 muon layer deposits;Layer energy [GeV];Layer count", kEnergyBinCount, 0.0, segment_xmax[2]),
   };
+
   for (TH1D& histogram : segment_histograms) {
     histogram.SetDirectory(nullptr);
     histogram.SetStats(false);
@@ -169,7 +152,7 @@ void calibrate_MIP(const char* events_path_cstr,
   for (Long64_t event_index = 0; event_index < entry_count; ++event_index) {
     tree->GetEntry(event_index);
 
-    // Fill one segment histogram with all same-segment layer deposits across the muon sample.
+    // Fill one histogram per segment with all same-segment layer deposits.
     for (int layer_index = 0; layer_index < kLayerCount; ++layer_index) {
       const double value = static_cast<double>(layer_energy[static_cast<std::size_t>(layer_index)]);
       if (!std::isfinite(value) || value < 0.0) {
@@ -180,26 +163,50 @@ void calibrate_MIP(const char* events_path_cstr,
     }
   }
 
-  std::vector<double> mpvs;
-  std::vector<double> thresholds;
-  mpvs.reserve(kSegmentCount);
-  thresholds.reserve(kSegmentCount);
-  for (TH1D& histogram : segment_histograms) {
-    const double mpv = estimate_mpv(histogram);
-    mpvs.push_back(mpv);
-    thresholds.push_back(alpha * mpv);
+  std::array<std::unique_ptr<TF1>, kSegmentCount> landau_fits;
+  for (int segment_index = 0; segment_index < kSegmentCount; ++segment_index) {
+    TH1D& histogram = segment_histograms[static_cast<std::size_t>(segment_index)];
+    const double fallback_mpv = peak_bin_center(histogram);
+    const std::string fit_name = "landau_fit_seg" + std::to_string(segment_index + 1);
+    landau_fits[static_cast<std::size_t>(segment_index)] = std::make_unique<TF1>(
+        fit_name.c_str(), "landau", 0.0, histogram.GetXaxis()->GetXmax());
+
+    TF1& landau_fit = *landau_fits[static_cast<std::size_t>(segment_index)];
+    landau_fit.SetParameters(
+        histogram.GetMaximum(),
+        fallback_mpv,
+        std::max(1e-6, fallback_mpv * 0.25));
+
+    const int fit_status = histogram.Fit(&landau_fit, "Q0R");
+    const double fitted_mpv = landau_fit.GetParameter(1);
+    const double median = quantile(segment_values[static_cast<std::size_t>(segment_index)], 0.50);
+    const double p90 = quantile(segment_values[static_cast<std::size_t>(segment_index)], 0.90);
+    const double p99 = quantile(segment_values[static_cast<std::size_t>(segment_index)], 0.99);
+
+    std::cout << "[plot_landau] segment " << (segment_index + 1)
+              << " entries=" << histogram.GetEntries()
+              << " median=" << median
+              << " p90=" << p90
+              << " p99=" << p99
+              << " xmax=" << histogram.GetXaxis()->GetXmax()
+              << " fallback_mpv=" << fallback_mpv
+              << " fitted_mpv=" << fitted_mpv
+              << " fit_status=" << fit_status
+              << " chi2_ndf=" << landau_fit.GetChisquare() << "/" << landau_fit.GetNDF()
+              << "\n";
   }
 
-  nlohmann::json output_json;
-  output_json["alpha"] = alpha;
-  output_json["mpvs"] = mpvs;
-  output_json["thresholds"] = thresholds;
-
-  std::ofstream output_file(out_json_path);
-  if (!output_file) {
-    std::cerr << "[calibrate_MIP] Failed to open " << out_json_path << " for writing.\n";
+  TFile output_file(out_path.c_str(), "RECREATE");
+  if (output_file.IsZombie()) {
+    std::cerr << "[plot_landau] Failed to open " << out_path << " for writing.\n";
     return;
   }
-  output_file << output_json.dump(2) << '\n';
-  std::cout << "[calibrate_MIP] Wrote " << out_json_path << ".\n";
+
+  for (int segment_index = 0; segment_index < kSegmentCount; ++segment_index) {
+    segment_histograms[static_cast<std::size_t>(segment_index)].Write();
+    landau_fits[static_cast<std::size_t>(segment_index)]->Write();
+  }
+
+  output_file.Close();
+  std::cout << "[plot_landau] Wrote " << out_path << ".\n";
 }

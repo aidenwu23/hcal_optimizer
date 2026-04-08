@@ -192,7 +192,7 @@ void performance(const char* events_path_cstr, const char* meta_path_cstr = "",
       }
     }
 
-    if (passing_layer_count >= 3) {
+    if (passing_layer_count >= 10) {
       stats.detected_event_count++;
     }
   }

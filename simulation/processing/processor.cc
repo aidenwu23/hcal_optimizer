@@ -1,16 +1,18 @@
 /*
-Write one event tree with the maximum prompt cell energy seen in each layer.
+Write one event tree with merged prompt cell energies for each layer.
 Reference: https://lists.bnl.gov/sympa/arc/epic-backward-hcal-l/2025-02/msg00006/pdfbFDp1SD90k.pdf
 */
 
-#include <cmath>
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "TFile.h"
 #include "TTree.h"
@@ -115,14 +117,16 @@ int main(int argc, char** argv) {
   }
 
   float  t_mc_E=0;
-  std::array<float, kLayerCount> t_layer_max_cell_E {};
+  std::array<std::vector<float>, kLayerCount> t_layer_cell_E {};
 
   TTree* events = new TTree("events", "per-event dataset");
+
+  // Write one event row with one merged cell-energy vector per layer.
   events->Branch("mc_E",   &t_mc_E);
   for (int layer_index = 0; layer_index < kLayerCount; ++layer_index) {
     events->Branch(
-        ("layer_" + std::to_string(layer_index) + "_max_cell_E").c_str(),
-        &t_layer_max_cell_E[static_cast<size_t>(layer_index)]);
+        ("layer_" + std::to_string(layer_index) + "_cell_E").c_str(),
+        &t_layer_cell_E[static_cast<size_t>(layer_index)]);
   }
   size_t nEvents=0, nWithMC=0, nWithSim=0;
 
@@ -163,7 +167,11 @@ int main(int argc, char** argv) {
       mcCollection = &frame.get<edm4hep::MCParticleCollection>("MCParticles");
     } catch (...) {}
 
+    // ==========================================================================
     // Pick the MC particle that best represents the injected particle.
+    // ==========================================================================
+    // Previously used to estimate sigma/E, currently serves no major purpose.
+
     if (mcCollection) {
       if (debug && nEvents==1) std::cerr << "[process] Using MC collection: MCParticles (size=" << mcCollection->size() << ")\n";
       
@@ -217,7 +225,14 @@ int main(int argc, char** argv) {
       ++nWithMC;
     }
 
-    t_layer_max_cell_E.fill(0.f);
+    // ==========================================================================
+    // Process cell-level info
+    // ==========================================================================
+    
+    // Start each event with empty per-layer cell lists.
+    for (auto& layer_cell_E : t_layer_cell_E) {
+      layer_cell_E.clear();
+    }
 
     // Load the calorimeter hit collection.
     const edm4hep::SimCalorimeterHitCollection* simCollection = nullptr;
@@ -232,9 +247,11 @@ int main(int argc, char** argv) {
         ++nWithSim;
       }
 
-      // Keep the largest cell energy seen in each layer after applying the integration window.
+      // Merge all hit contributions into one energy per physical cell.
+      std::array<std::map<std::uint64_t, double>, kLayerCount> layer_cell_energy_by_id;
       for (const auto& hit : *simCollection) {
-        const int layer_index = decode_layer_index(static_cast<std::uint64_t>(hit.getCellID()));
+        const std::uint64_t cell_id = static_cast<std::uint64_t>(hit.getCellID());
+        const int layer_index = decode_layer_index(cell_id);
         if (layer_index < 0 || layer_index >= kLayerCount) {
           continue;
         }
@@ -242,10 +259,18 @@ int main(int argc, char** argv) {
         if (integrated_energy <= 0.0) {
           continue;
         }
-        const std::size_t branch_index = static_cast<std::size_t>(layer_index);
-        t_layer_max_cell_E[branch_index] = std::max(
-            t_layer_max_cell_E[branch_index],
-            static_cast<float>(integrated_energy));
+        layer_cell_energy_by_id[static_cast<std::size_t>(layer_index)][cell_id] += integrated_energy;
+      }
+
+      // Store one merged energy value for each physical cell in the layer.
+      for (int layer_index = 0; layer_index < kLayerCount; ++layer_index) {
+        const auto& layer_cell_map = layer_cell_energy_by_id[static_cast<std::size_t>(layer_index)];
+        auto& layer_cell_vector = t_layer_cell_E[static_cast<std::size_t>(layer_index)];
+        layer_cell_vector.reserve(layer_cell_map.size());
+        for (const auto& [cell_id, cell_energy] : layer_cell_map) {
+          (void)cell_id;
+          layer_cell_vector.push_back(static_cast<float>(cell_energy));
+        }
       }
     }
 

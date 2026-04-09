@@ -7,11 +7,14 @@ Particle performance summary.
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -20,12 +23,10 @@ constexpr int kLayerCount = 10;
 struct PerformanceStats {
   long long valid_event_count = 0;
   long long detected_event_count = 0;
-};
-
-struct BinomialInterval {
-  double mean = 0.0;
-  double error_low = 0.0;
-  double error_high = 0.0;
+  double tile_count_sum = 0.0;
+  double tile_count_sum_squares = 0.0;
+  double layer_count_sum = 0.0;
+  double layer_count_sum_squares = 0.0;
 };
 
 std::string sibling_path(const std::string& path, const std::string& basename) {
@@ -62,27 +63,6 @@ bool load_json_file(const std::string& path,
   }
 
   return true;
-}
-
-BinomialInterval wilson_interval(long long successes, long long trials, double z_value) {
-  BinomialInterval interval;
-  if (trials <= 0) {
-    return interval;
-  }
-  const double trial_count = static_cast<double>(trials);
-  const double fraction = static_cast<double>(successes) / trial_count;
-  const double z_squared = z_value * z_value;
-  const double denominator = 1.0 + z_squared / trial_count;
-  const double center = (fraction + z_squared / (2.0 * trial_count)) / denominator;
-  const double margin =
-      (z_value / denominator) * std::sqrt((fraction * (1.0 - fraction) / trial_count) +
-          (z_squared / (4.0 * trial_count * trial_count)));
-  const double lower = std::max(0.0, center - margin);
-  const double upper = std::min(1.0, center + margin);
-  interval.mean = fraction;
-  interval.error_low = std::max(0.0, fraction - lower);
-  interval.error_high = std::max(0.0, upper - fraction);
-  return interval;
 }
 
 int layer_to_segment(int layer_index) {
@@ -132,16 +112,11 @@ void performance(const char* events_path_cstr, const char* meta_path_cstr = "",
     return;
   }
 
-  const std::string geometry_id = meta_json["geometry_id"].get<std::string>();
-  const std::string gun_particle = meta_json["gun_particle"].get<std::string>();
   const double total_energy_GeV = meta_json["total_energy_GeV"].get<double>();
   std::array<double, 3> thresholds {};
   for (std::size_t segment_index = 0; segment_index < thresholds.size(); ++segment_index) {
     thresholds[segment_index] = calibration_json["thresholds"][segment_index].get<double>();
   }
-
-  const double wilson_z = 1.0;  // 1-sigma Wilson interval for the efficiency error.
-
   TFile input_file(events_path.c_str(), "READ");
   if (input_file.IsZombie()) {
     std::cerr << "[performance] Failed to open " << events_path << ".\n";
@@ -155,9 +130,9 @@ void performance(const char* events_path_cstr, const char* meta_path_cstr = "",
     return;
   }
 
-  // Ensure the processed tree contains the prompt max-cell branches for every layer.
+  // Ensure the processed tree contains the per-layer cell-energy branches.
   for (int layer_index = 0; layer_index < kLayerCount; ++layer_index) {
-    const std::string branch_name = "layer_" + std::to_string(layer_index) + "_max_cell_E";
+    const std::string branch_name = "layer_" + std::to_string(layer_index) + "_cell_E";
     if (tree->GetBranch(branch_name.c_str()) == nullptr) {
       std::cerr << "[performance] Branch '" << branch_name << "' not found in "
                 << events_path << ".\n";
@@ -166,16 +141,16 @@ void performance(const char* events_path_cstr, const char* meta_path_cstr = "",
   }
 
   float mc_E = 0.0F;
-  std::array<float, kLayerCount> layer_max_cell_E {};
+  std::array<std::vector<float>*, kLayerCount> layer_cell_E {};
   tree->SetBranchAddress("mc_E", &mc_E);
   for (int layer_index = 0; layer_index < kLayerCount; ++layer_index) {
-    const std::string branch_name = "layer_" + std::to_string(layer_index) + "_max_cell_E";
-    tree->SetBranchAddress(branch_name.c_str(), &layer_max_cell_E[static_cast<std::size_t>(layer_index)]);
+    const std::string branch_name = "layer_" + std::to_string(layer_index) + "_cell_E";
+    tree->SetBranchAddress(branch_name.c_str(), &layer_cell_E[static_cast<std::size_t>(layer_index)]);
   }
 
   PerformanceStats stats;
   const Long64_t entry_count = tree->GetEntries();
-  // Count events with at least one layer above its segment threshold.
+  // Count the binary efficiency and store the tile/layer multiplicities for each valid event.
   for (Long64_t entry_index = 0; entry_index < entry_count; ++entry_index) {
     tree->GetEntry(entry_index);
 
@@ -187,40 +162,67 @@ void performance(const char* events_path_cstr, const char* meta_path_cstr = "",
 
     stats.valid_event_count++;
 
-    int passing_layer_count = 0;
+    int fired_cell_count = 0;
+    int fired_layer_count = 0;
     for (int layer_index = 0; layer_index < kLayerCount; ++layer_index) {
       const int segment_index = layer_to_segment(layer_index);
-      if (static_cast<double>(layer_max_cell_E[static_cast<std::size_t>(layer_index)]) >=
-          thresholds[static_cast<std::size_t>(segment_index)]) {
-        passing_layer_count++;
+      const auto* cell_energies = layer_cell_E[static_cast<std::size_t>(layer_index)];
+      if (!cell_energies) {
+        continue;
+      }
+      bool layer_has_fired_cell = false;
+      for (const float cell_energy : *cell_energies) {
+        if (static_cast<double>(cell_energy) >= thresholds[static_cast<std::size_t>(segment_index)]) {
+          fired_cell_count++;
+          layer_has_fired_cell = true;
+        }
+      }
+      if (layer_has_fired_cell) {
+        fired_layer_count++;
       }
     }
 
-    if (passing_layer_count >= 1) {
+    const double fired_tile_count = static_cast<double>(fired_cell_count);
+    const double fired_layer_total = static_cast<double>(fired_layer_count);
+    stats.tile_count_sum += fired_tile_count;
+    stats.tile_count_sum_squares += fired_tile_count * fired_tile_count;
+    stats.layer_count_sum += fired_layer_total;
+    stats.layer_count_sum_squares += fired_layer_total * fired_layer_total;
+
+    if (fired_layer_count >= 1) {
       stats.detected_event_count++;
     }
   }
 
   nlohmann::json output;
-  output["geometry_id"] = geometry_id;
-  output["gun_particle"] = gun_particle;
-  if (meta_json.contains("kinetic_energy_GeV")) {
-    output["kinetic_energy_GeV"] = meta_json["kinetic_energy_GeV"];
-  }
-  output["total_energy_GeV"] = total_energy_GeV;
   output["valid_event_count"] = stats.valid_event_count;
   output["detected_event_count"] = stats.detected_event_count;
 
-  const BinomialInterval efficiency_interval =
-      wilson_interval(stats.detected_event_count, stats.valid_event_count, wilson_z);
   if (stats.valid_event_count > 0) {
-    output["detection_efficiency"] = efficiency_interval.mean;
-    output["eff_lo"] = efficiency_interval.error_low;
-    output["eff_hi"] = efficiency_interval.error_high;
+    const double valid_event_count = static_cast<double>(stats.valid_event_count);
+    const double detection_efficiency =
+        static_cast<double>(stats.detected_event_count) / valid_event_count;
+    const double tiles_mean = stats.tile_count_sum / valid_event_count;
+    const double tiles_variance = std::max(
+        0.0,
+        (stats.tile_count_sum_squares / valid_event_count) -
+            (tiles_mean * tiles_mean));
+    const double layers_mean = stats.layer_count_sum / valid_event_count;
+    const double layers_variance = std::max(
+        0.0,
+        (stats.layer_count_sum_squares / valid_event_count) -
+            (layers_mean * layers_mean));
+    output["detection_efficiency"] = detection_efficiency;
+    output["tiles_mean"] = tiles_mean;
+    output["tiles_std"] = std::sqrt(tiles_variance);
+    output["layers_mean"] = layers_mean;
+    output["layers_std"] = std::sqrt(layers_variance);
   } else {
     output["detection_efficiency"] = nullptr;
-    output["eff_lo"] = nullptr;
-    output["eff_hi"] = nullptr;
+    output["tiles_mean"] = nullptr;
+    output["tiles_std"] = nullptr;
+    output["layers_mean"] = nullptr;
+    output["layers_std"] = nullptr;
   }
 
   std::ofstream output_file(out_path);

@@ -1,5 +1,5 @@
-name: bhcal
-tag_prefix: bhcal_2x_scint
+name: test
+tag_prefix: test
 template: geometries/templates/hcal_template.xml
 detector_type: hcal
 index_base: 0
@@ -16,10 +16,10 @@ constants:
   seg2_layers: 3
   seg3_layers: 4
 variants:
-- tag: bhcal_2x_scint
-  t_absorber_seg1: 4
-  t_scin_seg1: 0.8
-  t_absorber_seg2: 4
-  t_scin_seg2: 0.8
-  t_absorber_seg3: 4
-  t_scin_seg3: 0.8
+- tag: test
+  t_absorber_seg1: 5
+  t_scin_seg1: 0.4
+  t_absorber_seg2: 5
+  t_scin_seg2: 0.4
+  t_absorber_seg3: 5
+  t_scin_seg3: 0.4

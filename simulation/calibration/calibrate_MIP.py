@@ -3,7 +3,7 @@
 Run a muon control simulation and measure the MIP calibration from raw hits.
 Example:
 python3 simulation/calibration/calibrate_MIP.py \
-  --spec geometries/sweeps/bhcal.yaml \
+  --spec geometries/sweeps/nhcal.yaml \
   --raw-out data/calib/run_mu_ctrl.edm4hep.root \
   --json-out data/calib/calibration.json \
   --plots-out data/calib/landau_plots.root \

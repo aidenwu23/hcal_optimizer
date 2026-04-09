@@ -1,5 +1,5 @@
-name: bhcal
-tag_prefix: bhcal
+name: nhcal
+tag_prefix: nhcal
 template: geometries/templates/hcal_template.xml
 detector_type: hcal
 index_base: 0
@@ -16,7 +16,7 @@ constants:
   seg2_layers: 3
   seg3_layers: 4
 variants:
-- tag: bhcal
+- tag: nhcal
   t_absorber_seg1: 4
   t_scin_seg1: 0.4
   t_absorber_seg2: 4

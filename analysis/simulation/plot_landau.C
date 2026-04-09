@@ -197,9 +197,11 @@ void plot_landau(const char* events_path_cstr, const char* out_path_cstr = "") {
   for (int segment_index = 0; segment_index < kSegmentCount; ++segment_index) {
     TH1D& histogram = segment_histograms[static_cast<std::size_t>(segment_index)];
     const double fallback_mpv = peak_bin_center(histogram);
+    const double xmin = std::max(0.0, 0.25 * fallback_mpv);
+    const double xmax = std::min(histogram.GetXaxis()->GetXmax(), 3.0 * fallback_mpv);
     const std::string fit_name = "landau_fit_seg" + std::to_string(segment_index + 1);
     landau_fits[static_cast<std::size_t>(segment_index)] = std::make_unique<TF1>(
-        fit_name.c_str(), "landau", 0.0, histogram.GetXaxis()->GetXmax());
+        fit_name.c_str(), "landau", xmin, xmax);
 
     TF1& landau_fit = *landau_fits[static_cast<std::size_t>(segment_index)];
     landau_fit.SetParameters(
@@ -207,8 +209,17 @@ void plot_landau(const char* events_path_cstr, const char* out_path_cstr = "") {
         fallback_mpv,
         std::max(1e-6, fallback_mpv * 0.25));
 
-    const int fit_status = histogram.Fit(&landau_fit, "Q0R");
-    const double fitted_mpv = landau_fit.GetParameter(1);
+    const int fit_status = histogram.Fit(&landau_fit, "QR0");
+    const double mu = landau_fit.GetParameter(1);
+    const double sigma = landau_fit.GetParameter(2);
+    const double fitted_mu = (fit_status == 0 && std::isfinite(mu)) ? mu : fallback_mpv;
+    double fitted_mpv = fallback_mpv;
+    if (fit_status == 0 && std::isfinite(mu) && std::isfinite(sigma) && sigma > 0.0) {
+      const double mpv = mu - 0.22278298 * sigma;
+      if (std::isfinite(mpv) && mpv >= 0.0) {
+        fitted_mpv = mpv;
+      }
+    }
     const double median = quantile(segment_values[static_cast<std::size_t>(segment_index)], 0.50);
     const double p90 = quantile(segment_values[static_cast<std::size_t>(segment_index)], 0.90);
     const double p99 = quantile(segment_values[static_cast<std::size_t>(segment_index)], 0.99);
@@ -220,6 +231,8 @@ void plot_landau(const char* events_path_cstr, const char* out_path_cstr = "") {
               << " p99=" << p99
               << " xmax=" << histogram.GetXaxis()->GetXmax()
               << " fallback_mpv=" << fallback_mpv
+              << " fitted_mu=" << fitted_mu
+              << " fitted_sigma=" << sigma
               << " fitted_mpv=" << fitted_mpv
               << " fit_status=" << fit_status
               << " chi2_ndf=" << landau_fit.GetChisquare() << "/" << landau_fit.GetNDF()

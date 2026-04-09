@@ -59,8 +59,7 @@ double quantile(std::vector<double> values, double fraction) {
   }
 
   const double clamped_fraction = std::clamp(fraction, 0.0, 1.0);
-  const std::size_t index = static_cast<std::size_t>(
-      clamped_fraction * static_cast<double>(values.size() - 1));
+  const std::size_t index = static_cast<std::size_t>(clamped_fraction * static_cast<double>(values.size() - 1));
   std::nth_element(values.begin(), values.begin() + static_cast<std::ptrdiff_t>(index), values.end());
   return values[index];
 }
@@ -83,13 +82,30 @@ double estimate_mpv(TH1D& histogram) {
     return 0.0;
   }
 
-  TF1 landau_fit("landau_fit", "landau", 0.0, histogram.GetXaxis()->GetXmax());
-  landau_fit.SetParameters(histogram.GetMaximum(), fallback_mpv, std::max(1e-6, fallback_mpv * 0.25));
-  const int fit_status = histogram.Fit(&landau_fit, "Q0");
-  const double fitted_mpv = landau_fit.GetParameter(1);
-  if (fit_status == 0 && std::isfinite(fitted_mpv) && fitted_mpv >= 0.0) {
-    return fitted_mpv;
+  const double xmin = std::max(0.0, 0.25 * fallback_mpv);
+  const double xmax = std::min(histogram.GetXaxis()->GetXmax(), 3.0 * fallback_mpv);
+  if (!(xmax > xmin)) {
+    return fallback_mpv;
   }
+
+  TF1 landau_fit("landau_fit", "landau", xmin, xmax);
+  landau_fit.SetParameters(
+      histogram.GetMaximum(),
+      fallback_mpv,
+      std::max(1e-6, fallback_mpv * 0.25));
+
+  const int fit_status = histogram.Fit(&landau_fit, "QR0");
+
+  const double mu = landau_fit.GetParameter(1);
+  const double sigma = landau_fit.GetParameter(2);
+
+  if (fit_status == 0 && std::isfinite(mu) && std::isfinite(sigma) && sigma > 0.0) {
+    const double mpv = mu - 0.22278298 * sigma;
+    if (std::isfinite(mpv) && mpv >= 0.0) {
+      return mpv;
+    }
+  }
+
   return fallback_mpv;
 }
 

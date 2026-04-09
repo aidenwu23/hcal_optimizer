@@ -4,17 +4,17 @@ Generate geometries from a sweep spec, run simulation and analysis, and write
 processed performance results for orchestrator.py.
 
 Example: 
-python3 conductor.py --spec geometries/sweeps/bhcal.yaml \
+python3 conductor.py --spec geometries/sweeps/nhcal.yaml \
   --mip-alpha 0.5 \
   --events 3000 \
   --gun-particle neutron \
-  --gun-kinetic-energy 1 \
+  --gun-kinetic-energy 0.5 \
   --seeds 67 --delete-intermediates && \
-python3 conductor.py --spec geometries/sweeps/control/bhcal_2x_scint.yaml \
+python3 conductor.py --spec geometries/sweeps/control/test.yaml \
   --mip-alpha 0.5 \
   --events 3000 \
   --gun-particle neutron \
-  --gun-kinetic-energy 1 \
+  --gun-kinetic-energy 0.5 \
   --seeds 67 --delete-intermediates
 """
 
@@ -55,6 +55,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--spec", "-s", nargs="+", required=True, help="Sweep spec(s) to materialise (YAML).")
     parser.add_argument("--overwrite-geos", action="store_true", help="Pass --overwrite to sweep_geometries.py.")
     parser.add_argument("--ddsim", default="ddsim", help="Path to ddsim executable (default: ddsim on PATH).")
+    parser.add_argument("--physics-list", default="FTFP_BERT", help="Physics list passed to ddsim.")
     parser.add_argument("--root-bin", default="root", help="Path to ROOT executable.")
     parser.add_argument("--process-bin", default=str(PROJECT_DIRECTORY / "build" / "bin" / "process"), help="Path to the processor binary.")
     parser.add_argument(

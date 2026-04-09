@@ -155,23 +155,27 @@ void performance(const char* events_path_cstr, const char* meta_path_cstr = "",
     return;
   }
 
-  // Parse layers.
+  // Ensure the processed tree contains the prompt max-cell branches for every layer.
   for (int layer_index = 0; layer_index < kLayerCount; ++layer_index) {
-    const std::string branch_name = "layer_" + std::to_string(layer_index) + "_E";
-    tree->GetBranch(branch_name.c_str());
+    const std::string branch_name = "layer_" + std::to_string(layer_index) + "_max_cell_E";
+    if (tree->GetBranch(branch_name.c_str()) == nullptr) {
+      std::cerr << "[performance] Branch '" << branch_name << "' not found in "
+                << events_path << ".\n";
+      return;
+    }
   }
 
   float mc_E = 0.0F;
-  std::array<float, kLayerCount> layer_E {};
+  std::array<float, kLayerCount> layer_max_cell_E {};
   tree->SetBranchAddress("mc_E", &mc_E);
   for (int layer_index = 0; layer_index < kLayerCount; ++layer_index) {
-    const std::string branch_name = "layer_" + std::to_string(layer_index) + "_E";
-    tree->SetBranchAddress(branch_name.c_str(), &layer_E[static_cast<std::size_t>(layer_index)]);
+    const std::string branch_name = "layer_" + std::to_string(layer_index) + "_max_cell_E";
+    tree->SetBranchAddress(branch_name.c_str(), &layer_max_cell_E[static_cast<std::size_t>(layer_index)]);
   }
 
   PerformanceStats stats;
   const Long64_t entry_count = tree->GetEntries();
-  // Count the events with at least three layers above their segment thresholds.
+  // Count events with at least one layer above its segment threshold.
   for (Long64_t entry_index = 0; entry_index < entry_count; ++entry_index) {
     tree->GetEntry(entry_index);
 
@@ -182,17 +186,17 @@ void performance(const char* events_path_cstr, const char* meta_path_cstr = "",
     }
 
     stats.valid_event_count++;
-    
+
     int passing_layer_count = 0;
     for (int layer_index = 0; layer_index < kLayerCount; ++layer_index) {
       const int segment_index = layer_to_segment(layer_index);
-      if (static_cast<double>(layer_E[static_cast<std::size_t>(layer_index)]) >=
+      if (static_cast<double>(layer_max_cell_E[static_cast<std::size_t>(layer_index)]) >=
           thresholds[static_cast<std::size_t>(segment_index)]) {
         passing_layer_count++;
       }
     }
 
-    if (passing_layer_count >= 4) {
+    if (passing_layer_count >= 1) {
       stats.detected_event_count++;
     }
   }

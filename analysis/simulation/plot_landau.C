@@ -1,28 +1,39 @@
 /*
-Write segment Landau-fit histograms from a muon control events.root file.
+Write segment Landau-fit histograms from a raw muon EDM4hep file.
 Example:
-root -l -b -q 'analysis/simulation/plot_landau.C("data/processed/04e3fdfb/run_mu_ctrl/events.root","landau_plots.root")'
+root -l -b -q 'analysis/simulation/plot_landau.C("data/raw/04e3fdfb/run_mu_ctrl_10k/run_mu_ctrl.edm4hep.root","landau_plots.root")'
 */
 
-#include <TFile.h>
 #include <TF1.h>
 #include <TH1D.h>
-#include <TTree.h>
+#include <TFile.h>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include <podio/Frame.h>
+#include <podio/ROOTReader.h>
+
+#include "edm4hep/SimCalorimeterHitCollection.h"
 
 namespace {
 
 constexpr int kLayerCount = 10;
 constexpr int kSegmentCount = 3;
 constexpr int kEnergyBinCount = 400;
+constexpr int kLayerBitOffset = 8;
+constexpr std::uint64_t kLayerMask = 0xFF;
 constexpr double kRangeQuantile = 0.995;
+
+int decode_layer_index(std::uint64_t cell_id) {
+  return static_cast<int>((cell_id >> kLayerBitOffset) & kLayerMask);
+}
 
 int layer_to_segment(int layer_index) {
   if (layer_index < 3) {
@@ -70,15 +81,82 @@ double histogram_xmax(const std::vector<double>& values) {
   const double upper_quantile = quantile(values, kRangeQuantile);
   const double scaled_quantile = upper_quantile > 0.0 ? upper_quantile * 1.15 : 0.0;
   const double scaled_median = median > 0.0 ? median * 6.0 : 0.0;
-  const double x_max = std::max({scaled_quantile, scaled_median, 1e-6});
-  return x_max;
+  return std::max({scaled_quantile, scaled_median, 1e-6});
+}
+
+// Read raw calorimeter hits and collect one per-layer summed energy per event.
+bool collect_segment_layer_energies(
+    const std::string& events_path,
+    std::array<std::vector<double>, kSegmentCount>& segment_values) {
+  podio::ROOTReader reader;
+  try {
+    reader.openFile(events_path);
+  } catch (const std::exception& error) {
+    std::cerr << "[plot_landau] Failed to open " << events_path << ": "
+              << error.what() << ".\n";
+    return false;
+  }
+
+  std::string category = "events";
+  try {
+    const auto categories = reader.getAvailableCategories();
+    if (!categories.empty() &&
+        std::find(categories.begin(), categories.end(), "events") == categories.end()) {
+      category = categories.front();
+    }
+  } catch (...) {
+  }
+
+  const size_t entry_count = reader.getEntries(category);
+  for (std::size_t segment_index = 0; segment_index < segment_values.size(); ++segment_index) {
+    const int layer_count = segment_index < 2 ? 3 : 4;
+    segment_values[segment_index].reserve(entry_count * static_cast<std::size_t>(layer_count));
+  }
+
+  for (size_t event_index = 0; event_index < entry_count; ++event_index) {
+    auto frame_data = reader.readEntry(category, event_index);
+    podio::Frame frame(std::move(frame_data));
+
+    std::array<double, kLayerCount> layer_energy {};
+    layer_energy.fill(0.0);
+
+    const edm4hep::SimCalorimeterHitCollection* sim_collection = nullptr;
+    try {
+      sim_collection = &frame.get<edm4hep::SimCalorimeterHitCollection>("HCal_Readout");
+    } catch (...) {
+      sim_collection = nullptr;
+    }
+    if (sim_collection) {
+      // Straight muons make cell-level spectra pile up near zero in off-track edge cells.
+      // Sum by layer so the plots match the calibration observable instead.
+      for (const auto& hit : *sim_collection) {
+        const int layer_index = decode_layer_index(static_cast<std::uint64_t>(hit.getCellID()));
+        if (layer_index < 0 || layer_index >= kLayerCount) {
+          continue;
+        }
+        layer_energy[static_cast<std::size_t>(layer_index)] += static_cast<double>(hit.getEnergy());
+      }
+    }
+
+    // Keep one per-layer energy entry per event, pooled by segment.
+    for (int layer_index = 0; layer_index < kLayerCount; ++layer_index) {
+      const double value = layer_energy[static_cast<std::size_t>(layer_index)];
+      if (!std::isfinite(value) || value < 0.0) {
+        continue;
+      }
+      const int segment_index = layer_to_segment(layer_index);
+      segment_values[static_cast<std::size_t>(segment_index)].push_back(value);
+    }
+  }
+
+  return true;
 }
 
 }  // namespace
 
 void plot_landau(const char* events_path_cstr, const char* out_path_cstr = "") {
   if (!events_path_cstr || std::string(events_path_cstr).empty()) {
-    std::cerr << "[plot_landau] events.root path is required.\n";
+    std::cerr << "[plot_landau] Raw EDM4hep path is required.\n";
     return;
   }
 
@@ -88,49 +166,9 @@ void plot_landau(const char* events_path_cstr, const char* out_path_cstr = "") {
           ? std::string(out_path_cstr)
           : sibling_path(events_path, "landau_plots.root");
 
-  TFile input_file(events_path.c_str(), "READ");
-  if (input_file.IsZombie()) {
-    std::cerr << "[plot_landau] Failed to open " << events_path << ".\n";
-    return;
-  }
-
-  TTree* tree = nullptr;
-  input_file.GetObject("events", tree);
-  if (!tree) {
-    std::cerr << "[plot_landau] Tree 'events' not found in " << events_path << ".\n";
-    return;
-  }
-
-  std::array<float, kLayerCount> layer_energy {};
-  for (int layer_index = 0; layer_index < kLayerCount; ++layer_index) {
-    const std::string branch_name = "layer_" + std::to_string(layer_index) + "_E";
-    if (tree->GetBranch(branch_name.c_str()) == nullptr) {
-      std::cerr << "[plot_landau] Branch '" << branch_name << "' not found in "
-                << events_path << ".\n";
-      return;
-    }
-    tree->SetBranchAddress(branch_name.c_str(), &layer_energy[static_cast<std::size_t>(layer_index)]);
-  }
-
   std::array<std::vector<double>, kSegmentCount> segment_values;
-  const Long64_t entry_count = tree->GetEntries();
-  for (std::size_t segment_index = 0; segment_index < segment_values.size(); ++segment_index) {
-    const int layer_count = segment_index < 2 ? 3 : 4;
-    segment_values[segment_index].reserve(static_cast<std::size_t>(entry_count) * layer_count);
-  }
-
-  for (Long64_t event_index = 0; event_index < entry_count; ++event_index) {
-    tree->GetEntry(event_index);
-
-    // Collect one value per layer so the histogram range can ignore rare outliers.
-    for (int layer_index = 0; layer_index < kLayerCount; ++layer_index) {
-      const double value = static_cast<double>(layer_energy[static_cast<std::size_t>(layer_index)]);
-      if (!std::isfinite(value) || value < 0.0) {
-        continue;
-      }
-      const int segment_index = layer_to_segment(layer_index);
-      segment_values[static_cast<std::size_t>(segment_index)].push_back(value);
-    }
+  if (!collect_segment_layer_energies(events_path, segment_values)) {
+    return;
   }
 
   std::array<double, kSegmentCount> segment_xmax {};
@@ -149,17 +187,9 @@ void plot_landau(const char* events_path_cstr, const char* out_path_cstr = "") {
     histogram.SetStats(false);
   }
 
-  for (Long64_t event_index = 0; event_index < entry_count; ++event_index) {
-    tree->GetEntry(event_index);
-
-    // Fill one histogram per segment with all same-segment layer deposits.
-    for (int layer_index = 0; layer_index < kLayerCount; ++layer_index) {
-      const double value = static_cast<double>(layer_energy[static_cast<std::size_t>(layer_index)]);
-      if (!std::isfinite(value) || value < 0.0) {
-        continue;
-      }
-      const int segment_index = layer_to_segment(layer_index);
-      segment_histograms[static_cast<std::size_t>(segment_index)].Fill(value);
+  for (std::size_t segment_index = 0; segment_index < segment_values.size(); ++segment_index) {
+    for (const double value : segment_values[segment_index]) {
+      segment_histograms[segment_index].Fill(value);
     }
   }
 

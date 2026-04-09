@@ -1,6 +1,7 @@
-// CLI:
-//   process <input.edm4hep.root> [--out out.root]
-//            [--expected-pdg PDG] [--debug]
+/*
+Write one event tree with the maximum prompt cell energy seen in each layer.
+Reference: https://lists.bnl.gov/sympa/arc/epic-backward-hcal-l/2025-02/msg00006/pdfbFDp1SD90k.pdf
+*/
 
 #include <cmath>
 #include <algorithm>
@@ -11,7 +12,6 @@
 #include <optional>
 #include <string>
 
-// ROOT I/O
 #include "TFile.h"
 #include "TTree.h"
 
@@ -26,9 +26,25 @@ namespace {
 constexpr int kLayerCount = 10;
 constexpr int kLayerBitOffset = 8;
 constexpr std::uint64_t kLayerMask = 0xFF;
+constexpr double kWindowTimeMinNs = 0.0;
+constexpr double kWindowTimeMaxNs = 100.0;
 
 int decode_layer_index(std::uint64_t cell_id) {
   return static_cast<int>((cell_id >> kLayerBitOffset) & kLayerMask);
+}
+
+// Sum up all hit energies in a cell from t_0 to t_f, in nanoseconds.
+double integrated_hit_energy_in_window(const edm4hep::SimCalorimeterHit& hit) {
+  double integrated_energy = 0.0;
+  const auto contributions = hit.getContributions();
+  for (const auto& contribution : contributions) {
+    const double time_ns = static_cast<double>(contribution.getTime());
+    if (time_ns < kWindowTimeMinNs || time_ns > kWindowTimeMaxNs) {
+      continue;
+    }
+    integrated_energy += static_cast<double>(contribution.getEnergy());
+  }
+  return integrated_energy;
 }
 
 }  // namespace
@@ -99,14 +115,14 @@ int main(int argc, char** argv) {
   }
 
   float  t_mc_E=0;
-  std::array<float, kLayerCount> t_layer_E {};
+  std::array<float, kLayerCount> t_layer_max_cell_E {};
 
   TTree* events = new TTree("events", "per-event dataset");
   events->Branch("mc_E",   &t_mc_E);
   for (int layer_index = 0; layer_index < kLayerCount; ++layer_index) {
     events->Branch(
-        ("layer_" + std::to_string(layer_index) + "_E").c_str(),
-        &t_layer_E[static_cast<size_t>(layer_index)]);
+        ("layer_" + std::to_string(layer_index) + "_max_cell_E").c_str(),
+        &t_layer_max_cell_E[static_cast<size_t>(layer_index)]);
   }
   size_t nEvents=0, nWithMC=0, nWithSim=0;
 
@@ -201,7 +217,7 @@ int main(int argc, char** argv) {
       ++nWithMC;
     }
 
-    t_layer_E.fill(0.f);
+    t_layer_max_cell_E.fill(0.f);
 
     // Load the calorimeter hit collection.
     const edm4hep::SimCalorimeterHitCollection* simCollection = nullptr;
@@ -216,14 +232,20 @@ int main(int argc, char** argv) {
         ++nWithSim;
       }
 
-      // Sum up all hit energy per layer.
+      // Keep the largest cell energy seen in each layer after applying the integration window.
       for (const auto& hit : *simCollection) {
         const int layer_index = decode_layer_index(static_cast<std::uint64_t>(hit.getCellID()));
         if (layer_index < 0 || layer_index >= kLayerCount) {
           continue;
         }
-        const double e = hit.getEnergy();
-        t_layer_E[static_cast<size_t>(layer_index)] += static_cast<float>(e);
+        const double integrated_energy = integrated_hit_energy_in_window(hit);
+        if (integrated_energy <= 0.0) {
+          continue;
+        }
+        const std::size_t branch_index = static_cast<std::size_t>(layer_index);
+        t_layer_max_cell_E[branch_index] = std::max(
+            t_layer_max_cell_E[branch_index],
+            static_cast<float>(integrated_energy));
       }
     }
 

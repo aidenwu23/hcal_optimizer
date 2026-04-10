@@ -10,12 +10,12 @@ python3 conductor.py --spec geometries/sweeps/nhcal.yaml \
   --gun-particle neutron \
   --gun-momentum 0.5 \
   --seeds 67 --delete-intermediates && \
-python3 conductor.py --spec geometries/sweeps/control/test.yaml \
-  --mip-alpha 0.5 \
+
+python3 conductor.py --spec geometries/sweeps/nhcal.yaml \
+  --g4gps-spec simulation/g4gps/neutron_0.1-3_GeV.yaml \
   --events 3000 \
-  --gun-particle neutron \
-  --gun-momentum 0.5 \
-  --seeds 67 --delete-intermediates
+  --seeds 67 \
+  --mip-alpha 0.5
 """
 
 from __future__ import annotations
@@ -67,6 +67,11 @@ def parse_args() -> argparse.Namespace:
         default=["neutron"],
         help="Signal gun particle name(s).",
     )
+    parser.add_argument(
+        "--g4gps-spec",
+        default=None,
+        help="YAML beam spec used to generate a run-local G4GPS macro.",
+    )
     parser.add_argument("--gun-momentum", type=float, nargs="+", default=None, help="Gun momentum values in GeV passed to ddsim.")
     parser.add_argument("--gun-position", default="0 0 0", help="Gun position string passed to ddsim.")
     parser.add_argument("--gun-direction", default="0 0 -1", help="Gun direction string passed to ddsim.")
@@ -110,6 +115,8 @@ def resolve_spec_paths(spec_texts: List[str]) -> List[Path]:
 # Run one full campaign and write the final manifests.
 def main() -> None:
     args = parse_args()
+    if args.g4gps_spec:
+        args.g4gps_spec = str(resolve_runtime_path(args.g4gps_spec))
 
     # Resolve output paths.
     args.process_bin = str(resolve_runtime_path(args.process_bin))

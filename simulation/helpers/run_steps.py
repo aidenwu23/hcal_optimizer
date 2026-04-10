@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .geometry_index import GeometryVariant, eval_geometry_length_mm
+from .spectrum import build_gps_macro_text, load_g4gps_spec
 from .run_plan import RunPlan, RunRecord
 
 PROJECT_DIRECTORY = Path(__file__).resolve().parents[2]
@@ -222,7 +223,6 @@ def write_scaled_mip_calibration(
 def run_ddsim(args: argparse.Namespace, run_plan: RunPlan) -> float:
     """Fire ddsim for this plan and return the wall-clock seconds spent."""
     ensure_dir(run_plan.raw_path.parent)
-    momentum_expression = f"{run_plan.momentum_GeV}*GeV"
 
     # Keep the gun settings and particle-tracking options explicit so the raw file contains the
     # full truth record needed by later calibration and performance steps.
@@ -234,17 +234,6 @@ def run_ddsim(args: argparse.Namespace, run_plan: RunPlan) -> float:
         args.physics_list,
         "--outputFile",
         str(run_plan.raw_path),
-        "--numberOfEvents",
-        str(run_plan.n_events),
-        "--enableGun",
-        "--gun.particle",
-        run_plan.gun_particle,
-        "--gun.energy",
-        momentum_expression,
-        "--gun.direction",
-        run_plan.gun_direction,
-        "--gun.position",
-        run_plan.gun_position,
         "--part.keepAllParticles",
         "true",
         "--part.minimalKineticEnergy",
@@ -252,6 +241,52 @@ def run_ddsim(args: argparse.Namespace, run_plan: RunPlan) -> float:
         "--part.minDistToParentVertex",
         "0*mm",
     ]
+
+    # Use a g4gps spec.
+    if run_plan.beam_mode == "g4gps_spec":
+        if run_plan.g4gps_spec_path is None or run_plan.macro_path is None:
+            raise ValueError("G4GPS spec runs require g4gps_spec_path and macro_path.")
+        ensure_dir(run_plan.macro_path.parent)
+        spec = load_g4gps_spec(run_plan.g4gps_spec_path)
+        macro_text = build_gps_macro_text(
+            spec,
+            event_count=run_plan.n_events,
+        )
+        if args.dry_run:
+            print(f"[gps_macro] write {run_plan.macro_path}")
+        else:
+            with run_plan.macro_path.open("w", encoding="utf-8") as macro_file:
+                macro_file.write(macro_text)
+        command.extend(
+            [
+                "--runType",
+                "run",
+                "--macroFile",
+                str(run_plan.macro_path),
+                "--enableG4GPS",
+            ]
+        )
+        
+    # Or... use the default particle gun.
+    else:
+        if run_plan.momentum_GeV is None:
+            raise ValueError("Fixed-gun runs require momentum_GeV.")
+        momentum_expression = f"{run_plan.momentum_GeV}*GeV"
+        command.extend(
+            [
+                "--numberOfEvents",
+                str(run_plan.n_events),
+                "--enableGun",
+                "--gun.particle",
+                run_plan.gun_particle,
+                "--gun.energy",
+                momentum_expression,
+                "--gun.direction",
+                run_plan.gun_direction,
+                "--gun.position",
+                run_plan.gun_position,
+            ]
+        )
     if run_plan.seed is not None:
         command.extend(["--random.seed", str(run_plan.seed)])
     start = time.time()
@@ -293,9 +328,21 @@ def write_metadata(
     payload: Dict[str, Any] = {
         "geometry_id": run_plan.geometry_variant.geometry_id,
         "gun_particle": run_plan.gun_particle,
-        "momentum_GeV": run_plan.momentum_GeV,
+        "beam_mode": run_plan.beam_mode,
+        "beam_label": run_plan.beam_label,
         "seed": run_plan.seed,
     }
+    if run_plan.momentum_GeV is not None:
+        payload["momentum_GeV"] = run_plan.momentum_GeV
+    if run_plan.g4gps_spec_path is not None:
+        spec = load_g4gps_spec(run_plan.g4gps_spec_path)
+        payload["g4gps_spec_path"] = str(run_plan.g4gps_spec_path)
+        payload["spectrum_id"] = spec.spec_id
+        payload["spectrum_x_axis"] = spec.x_axis
+        payload["spectrum_x_min_GeV"] = spec.x_min_GeV
+        payload["spectrum_x_max_GeV"] = spec.x_max_GeV
+    if run_plan.macro_path is not None:
+        payload["macro_path"] = str(run_plan.macro_path)
     start = time.time()
 
     # In dry-run mode report the intended output path without creating files.
@@ -334,21 +381,34 @@ def write_run_manifests(run_records: List[RunRecord], json_path: Path, csv_path:
 
     # Build one manifest row per run so later tools can discover outputs without walking the data tree.
     for run_record in run_records:
+        row = {
+            "geometry_id": run_record.plan.geometry_variant.geometry_id,
+            "run_id": run_record.plan.run_id,
+            "particle": run_record.plan.gun_particle,
+            "beam_mode": run_record.plan.beam_mode,
+            "beam_label": run_record.plan.beam_label,
+            "momentum_GeV": run_record.plan.momentum_GeV,
+            "spectrum_id": None,
+            "spectrum_x_axis": None,
+            "spectrum_x_min_GeV": None,
+            "spectrum_x_max_GeV": None,
+            "seed": run_record.plan.seed,
+            "status": run_record.status,
+            "raw_path": str(run_record.plan.raw_path),
+            "events_path": str(run_record.plan.events_path),
+            "meta_path": str(run_record.plan.meta_path),
+            "calibration_path": str(run_record.plan.calibration_path),
+            "performance_path": str(run_record.plan.performance_path),
+            "error": run_record.error,
+        }
+        if run_record.plan.g4gps_spec_path is not None:
+            spec = load_g4gps_spec(run_record.plan.g4gps_spec_path)
+            row["spectrum_id"] = spec.spec_id
+            row["spectrum_x_axis"] = spec.x_axis
+            row["spectrum_x_min_GeV"] = spec.x_min_GeV
+            row["spectrum_x_max_GeV"] = spec.x_max_GeV
         rows.append(
-            {
-                "geometry_id": run_record.plan.geometry_variant.geometry_id,
-                "run_id": run_record.plan.run_id,
-                "particle": run_record.plan.gun_particle,
-                "momentum_GeV": run_record.plan.momentum_GeV,
-                "seed": run_record.plan.seed,
-                "status": run_record.status,
-                "raw_path": str(run_record.plan.raw_path),
-                "events_path": str(run_record.plan.events_path),
-                "meta_path": str(run_record.plan.meta_path),
-                "calibration_path": str(run_record.plan.calibration_path),
-                "performance_path": str(run_record.plan.performance_path),
-                "error": run_record.error,
-            }
+            row
         )
 
     # Keep both JSON and CSV forms so the manifest is easy to read by both scripts and spreadsheets.
@@ -358,7 +418,13 @@ def write_run_manifests(run_records: List[RunRecord], json_path: Path, csv_path:
         "geometry_id",
         "run_id",
         "particle",
+        "beam_mode",
+        "beam_label",
         "momentum_GeV",
+        "spectrum_id",
+        "spectrum_x_axis",
+        "spectrum_x_min_GeV",
+        "spectrum_x_max_GeV",
         "seed",
         "status",
         "raw_path",

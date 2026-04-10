@@ -1,0 +1,22 @@
+spec_id: example_beam
+
+particle: neutron
+# kinetic_energy_GeV or momentum_GeV
+x_axis: kinetic_energy_GeV
+
+position: [0.0, 0.0, 0.0]
+direction: [0.0, 0.0, -1.0]
+
+interpolation: Lin
+
+# This overrides --events in conductor.py
+events: 3000
+
+energy_spectrum:
+  # Use the list that matches x_axis. Values must be in increasing order.
+  # momentum_GeV specs are converted to kinetic-energy points before the macro is written.
+  kinetic_energy_GeV: [0.1, 0.2, 0.5, 1.0, 2.0, 3.0]
+  # momentum_GeV: [0.1, 0.2, 0.5, 1.0, 2.0, 3.0]
+
+  # Must have the same length as the chosen x-axis list. Relative weights are fine. They do not need to sum to 1.
+  weights: [1.0, 0.9, 0.6, 0.3, 0.1, 0.03]

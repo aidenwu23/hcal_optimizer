@@ -5,7 +5,7 @@ train_surrogate.py
 
 Train a LightGBM-based surrogate model mapping calorimeter geometry
 (absorber/scintillator thickness, segmentation, etc.)
-and kinetic energy to compact multi-particle performance metrics.
+to compact performance metrics.
 
 Targets:
   - inferred from the compact training CSV
@@ -41,7 +41,6 @@ from sklearn.metrics import mean_absolute_percentage_error
 # -----------------------------------------------------------------------------------------
 
 FEATURE_COLUMNS = [
-    "kinetic_energy_GeV",
     "seg1_layers",
     "seg2_layers",
     "seg3_layers",
@@ -67,13 +66,13 @@ NON_TARGET_COLUMNS = {
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Train a LightGBM surrogate model on geometry-and-energy performance metrics"
+        description="Train a LightGBM surrogate model on geometry performance metrics"
     )
 
     parser.add_argument(
         "--training-csv",
         required=True,
-        help="Path to the geometry-and-energy training CSV"
+        help="Path to the geometry training CSV"
     )
 
     parser.add_argument(

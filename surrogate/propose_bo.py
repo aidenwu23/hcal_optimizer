@@ -10,10 +10,7 @@ a sweep YAML compatible with hcal_optimizer/geometries/sweep_geometries.py.
     * bounds        -> optimized/proposed variables
     * fixed_features -> fixed surrogate inputs
     * sweep_base.constants -> fixed geometry written into output YAML
-- Candidate geometries are scored across an energy_spectrum using exact
-  kinetic-energy points and user-provided weights.
 - Surrogate expects features:
-    kinetic_energy_GeV,
     seg1_layers, seg2_layers, seg3_layers,
     t_absorber_seg1/2/3, t_scin_seg1/2/3
   
@@ -49,7 +46,6 @@ except Exception:
     _TORCH_OK = False
 
 SURROGATE_FEATURES = [
-    "kinetic_energy_GeV",
     "seg1_layers",
     "seg2_layers",
     "seg3_layers",
@@ -62,10 +58,7 @@ SURROGATE_FEATURES = [
 ]
 
 SURROGATE_TARGETS = [
-    "kaon0L_efficiency",
-    "kaon0L_energy_resolution",
     "neutron_efficiency",
-    "neutron_energy_resolution",
 ]
 
 GEOM_VARS = [
@@ -248,67 +241,6 @@ def score_candidates(pred: Dict[str, np.ndarray], scoring: Dict[str, Any]) -> np
     return scores
 
 
-def parse_energy_spectrum(spec: Dict[str, Any]) -> Tuple[np.ndarray, np.ndarray]:
-    # Read the exact kinetic-energy points and their weights from the BO spec.
-    energy_spectrum = spec.get("energy_spectrum", {}) or {}
-    if not isinstance(energy_spectrum, dict):
-        raise SystemExit("'energy_spectrum' must be a mapping if provided.")
-
-    energy_values = energy_spectrum.get("kinetic_energy_GeV")
-    weight_values = energy_spectrum.get("weights")
-
-    if energy_values is None and weight_values is None:
-        return np.array([1.0], dtype=float), np.array([1.0], dtype=float)
-    if energy_values is None or weight_values is None:
-        raise SystemExit("'energy_spectrum' must contain both 'kinetic_energy_GeV' and 'weights'.")
-    if not isinstance(energy_values, list) or not isinstance(weight_values, list):
-        raise SystemExit("'energy_spectrum.kinetic_energy_GeV' and 'energy_spectrum.weights' must be lists.")
-    if not energy_values:
-        raise SystemExit("'energy_spectrum.kinetic_energy_GeV' must not be empty.")
-    if len(energy_values) != len(weight_values):
-        raise SystemExit("'energy_spectrum.kinetic_energy_GeV' and 'energy_spectrum.weights' must have the same length.")
-
-    try:
-        kinetic_energies = np.array([float(value) for value in energy_values], dtype=float)
-        weights = np.array([float(value) for value in weight_values], dtype=float)
-    except Exception as exc:
-        raise SystemExit(f"Invalid 'energy_spectrum' values: {exc}") from exc
-
-    return kinetic_energies, weights
-
-
-# -------------------------------------------------------------------------------------------------
-# Mapping geometry -> surrogate features
-# -------------------------------------------------------------------------------------------------
-def geom_to_surrogate_features(
-    X_geom: np.ndarray,
-    geom_var_names: List[str],
-    feature_columns: List[str],
-    fixed_features: Dict[str, Any],
-) -> np.ndarray:
-    """
-    Build the surrogate feature matrix in the saved model feature order.
-    """
-    n = X_geom.shape[0]
-    Xs = np.zeros((n, len(feature_columns)), dtype=float)
-    feat_idx = {f: i for i, f in enumerate(feature_columns)}
-    geom_idx = {g: i for i, g in enumerate(geom_var_names)}
-
-    # Fixed features
-    for k, v in (fixed_features or {}).items():
-        if k not in feat_idx:
-            raise SystemExit(f"fixed_features contains unknown surrogate feature '{k}'")
-        Xs[:, feat_idx[k]] = float(v)
-
-
-    # Fill any proposed geometry vars that are also surrogate features
-    for g in geom_var_names:
-        if g in feat_idx:
-            Xs[:, feat_idx[g]] = X_geom[:, geom_idx[g]].astype(float)
-
-    return Xs
-
-
 # -------------------------------------------------------------------------------------------------
 # YAML emission
 # -------------------------------------------------------------------------------------------------
@@ -371,8 +303,6 @@ def main() -> None:
     fixed_features = spec.get("fixed_features", {}) or {}
     if not isinstance(fixed_features, dict):
         raise SystemExit("'fixed_features' must be a mapping if provided.")
-    kinetic_energies, energy_weights = parse_energy_spectrum(spec)
-
     constraints = spec.get("constraints", {}) or {}
     design_exprs = constraints.get("design", []) or []
     pred_exprs = constraints.get("predicted", []) or []
@@ -396,7 +326,7 @@ def main() -> None:
 
     missing_for_surrogate = [
         k for k in feature_columns
-        if k not in geom_var_names and k not in fixed_features and k != "kinetic_energy_GeV"
+        if k not in geom_var_names and k not in fixed_features
     ]
 
     if missing_for_surrogate:
@@ -421,49 +351,39 @@ def main() -> None:
 
     import pandas as pd
 
-    # Build one surrogate row per geometry-and-energy pair.
+    # Build one surrogate row per geometry.
     feature_rows: List[Dict[str, float]] = []
     for geometry_values in X_geom_d:
         geometry_feature_values = {
             geom_var_names[j]: float(geometry_values[j]) for j in range(len(geom_var_names))
         }
-        for kinetic_energy_gev in kinetic_energies:
-            feature_row: Dict[str, float] = {}
-            for feature_name in feature_columns:
-                if feature_name == "kinetic_energy_GeV":
-                    feature_row[feature_name] = float(kinetic_energy_gev)
-                elif feature_name in geometry_feature_values:
-                    feature_row[feature_name] = geometry_feature_values[feature_name]
-                elif feature_name in fixed_features:
-                    feature_row[feature_name] = float(fixed_features[feature_name])
-                else:
-                    raise SystemExit(
-                        f"Cannot build surrogate feature rows because '{feature_name}' is missing."
-                    )
-            feature_rows.append(feature_row)
+        feature_row: Dict[str, float] = {}
+        for feature_name in feature_columns:
+            if feature_name in geometry_feature_values:
+                feature_row[feature_name] = geometry_feature_values[feature_name]
+            elif feature_name in fixed_features:
+                feature_row[feature_name] = float(fixed_features[feature_name])
+            else:
+                raise SystemExit(
+                    f"Cannot build surrogate feature rows because '{feature_name}' is missing."
+                )
+        feature_rows.append(feature_row)
 
     Xs_df = pd.DataFrame(feature_rows, columns=feature_columns)
 
     Y = np.asarray(model.predict(Xs_df))
 
     n_candidates = X_geom_d.shape[0]
-    n_energies = len(kinetic_energies)
-    expected_rows = n_candidates * n_energies
-    if Y.ndim != 2 or Y.shape[0] != expected_rows or Y.shape[1] != len(target_columns):
+    if Y.ndim != 2 or Y.shape[0] != n_candidates or Y.shape[1] != len(target_columns):
         raise SystemExit(f"Unexpected surrogate output shape {Y.shape}; expected (N,{len(target_columns)}).")
 
     pred_flat = {name: Y[:, i] for i, name in enumerate(target_columns)}
 
-    # Every predicted constraint must hold at every evaluated energy for a candidate.
-    ok_pred_flat = filter_predicted_constraints(pred_flat, pred_exprs)
-    ok_pred = ok_pred_flat.reshape(n_candidates, n_energies).all(axis=1)
-
-    energy_scores_flat = score_candidates(pred_flat, scoring)
-    energy_scores = energy_scores_flat.reshape(n_candidates, n_energies)
-    aggregated_scores = energy_scores @ energy_weights
+    ok_pred = filter_predicted_constraints(pred_flat, pred_exprs)
+    scores = score_candidates(pred_flat, scoring)
 
     X_final = X_geom_d[ok_pred]
-    scores_final = aggregated_scores[ok_pred]
+    scores_final = scores[ok_pred]
 
     if X_final.shape[0] == 0:
         raise SystemExit("No candidates satisfy predicted constraints. Loosen constraints or increase pool.")

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .geometry_index import GeometryVariant
+from .spectrum import load_g4gps_spec
 
 PROJECT_DIRECTORY = Path(__file__).resolve().parents[2]
 DATA_DIRECTORY = PROJECT_DIRECTORY / "data"
@@ -48,7 +49,10 @@ def lookup_pdg(particle: str) -> Optional[int]:
 class RunPlan:
     geometry_variant: GeometryVariant
     gun_particle: str
-    momentum_GeV: float
+    beam_mode: str
+    beam_label: str
+    momentum_GeV: Optional[float]
+    g4gps_spec_path: Optional[Path]
     gun_direction: str
     gun_position: str
     seed: Optional[int]
@@ -60,6 +64,7 @@ class RunPlan:
     meta_path: Path
     calibration_path: Path
     performance_path: Path
+    macro_path: Optional[Path]
     expected_pdg: Optional[int]
 
 
@@ -80,7 +85,7 @@ class RunRecord:
 def compute_run_id(
     geometry_id: str,
     particle: str,
-    energy: float,
+    beam_label: str,
     seed: Optional[int],
     event_count: int,
     extra_tokens: Sequence[str],
@@ -90,7 +95,7 @@ def compute_run_id(
         [
             geometry_id,
             particle,
-            f"{energy:.6f}",
+            beam_label,
             seed_token,
             str(event_count),
             *extra_tokens,
@@ -112,6 +117,11 @@ def build_run_plans(
     seed_values: List[Optional[int]] = list(args.seeds) if args.seeds is not None else [None]
     requested_particles = [str(particle).strip() for particle in args.gun_particle if str(particle).strip()]
     momentum_values = list(args.gun_momentum)
+    loaded_g4gps_spec = None
+
+    if getattr(args, "g4gps_spec", None):
+        loaded_g4gps_spec = load_g4gps_spec(Path(args.g4gps_spec))
+
     for geometry_variant in geometry_variants:
         # Include the processor extras, geometry tag, and detector side in the run identity so
         # distinct physical or processing configurations do not collide onto the same run id.
@@ -119,17 +129,63 @@ def build_run_plans(
         gun_direction = geometry_variant.params.get("gun.direction", args.gun_direction)
         gun_position = geometry_variant.params.get("gun.position", args.gun_position)
 
+        plan_particles = requested_particles
+        if loaded_g4gps_spec is not None:
+            plan_particles = [loaded_g4gps_spec.particle]
+
         # Sweep over every requested particle
-        for particle in requested_particles:
+        for particle in plan_particles:
             expected_pdg = lookup_pdg(particle)
-            # Per particle, sweep all requested momenta
+            use_g4gps_spec = loaded_g4gps_spec is not None and particle.lower() == loaded_g4gps_spec.particle.lower()
+
+            # Path 1: use a G4GPS spec for a continuous energy spectra
+            if use_g4gps_spec:
+                event_count = loaded_g4gps_spec.event_count or args.events
+                
+                for seed in seed_values:
+                    run_id, run_id_int = compute_run_id(
+                        geometry_variant.geometry_id,
+                        particle,
+                        f"g4gps:{loaded_g4gps_spec.spec_id}",
+                        seed,
+                        event_count,
+                        run_id_tokens,
+                    )
+                    raw_output_directory = DATA_DIRECTORY / "raw" / geometry_variant.geometry_id
+                    processed_output_directory = DATA_DIRECTORY / "processed" / geometry_variant.geometry_id / run_id
+                    run_plans.append(
+                        RunPlan(
+                            geometry_variant=geometry_variant,
+                            gun_particle=particle,
+                            beam_mode="g4gps_spec",
+                            beam_label=loaded_g4gps_spec.spec_id,
+                            momentum_GeV=None,
+                            g4gps_spec_path=Path(args.g4gps_spec),
+                            gun_direction=loaded_g4gps_spec.direction,
+                            gun_position=loaded_g4gps_spec.position,
+                            seed=seed,
+                            n_events=event_count,
+                            run_id=run_id,
+                            run_id_int=run_id_int,
+                            raw_path=raw_output_directory / f"{run_id}.edm4hep.root",
+                            events_path=processed_output_directory / "events.root",
+                            meta_path=processed_output_directory / "meta.json",
+                            calibration_path=processed_output_directory / "calibration.json",
+                            performance_path=processed_output_directory / "performance.json",
+                            macro_path=processed_output_directory / "gps.mac",
+                            expected_pdg=expected_pdg,
+                        )
+                    )
+                continue
+
+            # Path 2: use discrete momenta values supported by the default ddsim particle gun.
             for momentum_gev in momentum_values:
                 # Per momentum, sweep every requested seed value
                 for seed in seed_values:
                     run_id, run_id_int = compute_run_id(
                         geometry_variant.geometry_id,
                         particle,
-                        momentum_gev,
+                        f"momentum:{momentum_gev:.6f}",
                         seed,
                         args.events,
                         run_id_tokens,
@@ -141,7 +197,10 @@ def build_run_plans(
                         RunPlan(
                             geometry_variant=geometry_variant,
                             gun_particle=particle,
+                            beam_mode="fixed_gun",
+                            beam_label=f"{momentum_gev:.6f}GeV",
                             momentum_GeV=momentum_gev,
+                            g4gps_spec_path=None,
                             gun_direction=gun_direction,
                             gun_position=gun_position,
                             seed=seed,
@@ -153,6 +212,7 @@ def build_run_plans(
                             meta_path=processed_output_directory / "meta.json",
                             calibration_path=processed_output_directory / "calibration.json",
                             performance_path=processed_output_directory / "performance.json",
+                            macro_path=None,
                             expected_pdg=expected_pdg,
                         )
                     )

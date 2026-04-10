@@ -39,23 +39,16 @@ fixed_features:
   seg2_layers: 3
   seg3_layers: 4
 
-energy_spectrum:
-  kinetic_energy_GeV: [1.0]
-  weights: [1.0]
-
 constraints:
-  # Constraints on surrogate outputs
-  predicted:
-    - "neutron_energy_resolution <= 1.0"
-    - "kaon0L_energy_resolution <= 1.0"
+  predicted: []
 
 scoring:
   mode: "tradeoff"   # metric | tradeoff
-  expr: "neutron_efficiency + kaon0L_efficiency"
+  expr: "neutron_efficiency"
   maximize: true
 
   # Example if you want a tradeoff instead:
-  # expr: "neutron_efficiency + kaon0L_efficiency - neutron_energy_resolution - kaon0L_energy_resolution"
+  # expr: "neutron_efficiency"
   # maximize: true
 
 diversity:

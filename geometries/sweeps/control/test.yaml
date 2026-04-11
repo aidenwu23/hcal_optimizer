@@ -17,9 +17,9 @@ constants:
   seg3_layers: 4
 variants:
 - tag: test
-  t_absorber_seg1: 5
+  t_absorber_seg1: 6
   t_scin_seg1: 0.4
-  t_absorber_seg2: 5
+  t_absorber_seg2: 6
   t_scin_seg2: 0.4
-  t_absorber_seg3: 5
+  t_absorber_seg3: 6
   t_scin_seg3: 0.4

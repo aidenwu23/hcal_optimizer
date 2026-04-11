@@ -8,12 +8,13 @@ python3 conductor.py --spec geometries/sweeps/nhcal.yaml \
   --mip-alpha 0.5 \
   --events 3000 \
   --gun-particle neutron \
-  --gun-momentum 0.5 \
+  --gun-momentum 0.9 \
   --seeds 67 --delete-intermediates && \
 
 python3 conductor.py --spec geometries/sweeps/nhcal.yaml \
-  --g4gps-spec simulation/g4gps/neutron_0.1-3_GeV.yaml \
-  --events 3000 \
+  --g4gps-spec simulation/g4gps/neutron_0.1-3_GeV_p.yaml \
+  --steering-file simulation/ddsim/threading.py \
+  --events 5000 \
   --seeds 67 \
   --mip-alpha 0.5
 """
@@ -70,7 +71,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--g4gps-spec",
         default=None,
-        help="YAML beam spec used to generate a run-local G4GPS macro.",
+        help="YAML beam spec used to generate a run-local G4GPS macro. This overrides the fixed gun settings.",
     )
     parser.add_argument("--gun-momentum", type=float, nargs="+", default=None, help="Gun momentum values in GeV passed to ddsim.")
     parser.add_argument("--gun-position", default="0 0 0", help="Gun position string passed to ddsim.")
@@ -146,8 +147,6 @@ def main() -> None:
     if not requested_particles:
         raise ValueError("At least one --gun-particle value is required.")
     args.gun_particle = requested_particles
-    has_non_muon_signal_particle = any(particle.lower() not in {"mu-", "mu+"} for particle in requested_particles)
-
     # Run one geometry at a time so each geometry finishes fully before the next one starts.
     run_records: List[RunRecord] = []
     any_run_plans = False
@@ -174,7 +173,7 @@ def main() -> None:
 
                 # Run the full chain for this plan from simulation through analysis outputs.
                 run_record.ddsim_seconds = run_ddsim(args, run_plan)
-                run_record.process_seconds, _ = run_process(
+                run_record.process_seconds = run_process(
                     args,
                     run_plan,
                     extra_process_flags,

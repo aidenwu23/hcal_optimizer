@@ -47,7 +47,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--out",
         required=True,
-        help="Output geometry-and-energy compact CSV path.",
+        help="Output geometry compact CSV path.",
     )
     return parser.parse_args()
 

@@ -10,9 +10,9 @@ import shlex
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
-from .geometry_index import GeometryVariant, eval_geometry_length_mm
+from .geometry_index import eval_geometry_length_mm
 from .spectrum import build_gps_macro_text, load_g4gps_spec
 from .run_plan import RunPlan, RunRecord
 
@@ -23,7 +23,6 @@ DATA_DIRECTORY = PROJECT_DIRECTORY / "data"
 REFERENCE_MIP_PATH = SIMULATION_DIRECTORY / "calibration" / "reference_mip_4mm.json"
 
 
-# Create the directory tree needed by a later output file.
 def ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
@@ -60,6 +59,7 @@ def flatten_process_extras(chunks: Sequence[Optional[str]]) -> List[str]:
         flags.extend(shlex.split(chunk))
     return flags
 
+
 # Materialize the generated geometry set before conductor builds run plans from it.
 def maybe_run_sweeps(args: argparse.Namespace, spec_paths: List[Path]) -> None:
     sweep_script = GEOMETRY_DIRECTORY / "sweep_geometries.py"
@@ -81,78 +81,6 @@ def maybe_run_sweeps(args: argparse.Namespace, spec_paths: List[Path]) -> None:
         if args.overwrite_geos:
             command.append("--overwrite")
         run_cmd(command, dry_run=args.dry_run, label="sweep")
-
-
-# Build one explicit muon-control calibration file from per-layer muon deposits.
-def run_mip_calibration(
-    args: argparse.Namespace,
-    geometry_variant: GeometryVariant,
-    extra_process_flags: List[str],
-) -> Path:
-    """Run the explicit muon control chain and write one calibration.json."""
-    muon_event_count = int(getattr(args, "muon_events", 2000))
-    calibration_directory = DATA_DIRECTORY / "processed" / geometry_variant.geometry_id / "run_mu_ctrl"
-    ensure_dir(calibration_directory)
-    raw_output_path = DATA_DIRECTORY / "raw" / geometry_variant.geometry_id / "run_mu_ctrl" / "run_mu_ctrl.edm4hep.root"
-    events_output_path = calibration_directory / "events.root"
-    calibration_path = calibration_directory / "calibration.json"
-
-    if calibration_path.exists() and not args.overwrite:
-        print(f"[mip_calibration] Skipping calibration for {geometry_variant.geometry_id}, output exists at {calibration_path}")
-        return calibration_path
-
-    ensure_dir(raw_output_path.parent)
-    ddsim_command = [
-        args.ddsim,
-        "--compactFile",
-        str(geometry_variant.xml_path),
-        "--physicsList",
-        args.physics_list,
-        "--outputFile",
-        str(raw_output_path),
-        "--numberOfEvents",
-        str(muon_event_count),
-        "--enableGun",
-        "--gun.particle",
-        "mu-",
-        "--gun.energy",
-        "10*GeV",
-        "--gun.direction",
-        args.gun_direction,
-        "--gun.position",
-        args.gun_position,
-        "--part.keepAllParticles",
-        "true",
-        "--part.minimalKineticEnergy",
-        "0*MeV",
-        "--part.minDistToParentVertex",
-        "0*mm",
-    ]
-    run_cmd(ddsim_command, dry_run=args.dry_run, label="mip_muon_ddsim")
-
-    process_command = [
-        args.process_bin,
-        str(raw_output_path),
-        "--out",
-        str(events_output_path),
-        "--expected-pdg",
-        "-13",
-    ] + extra_process_flags
-    run_cmd(process_command, dry_run=args.dry_run, label="mip_muon_process")
-
-    macro_path = SIMULATION_DIRECTORY / "calibration" / "calibrate_MIP.C"
-    calibration_command = [
-        args.root_bin,
-        "-l",
-        "-b",
-        "-q",
-        f'{macro_path}("{events_output_path}","{calibration_path}",{args.mip_alpha:.12g})',
-    ]
-    run_cmd(calibration_command, dry_run=args.dry_run, label="mip_calibration")
-
-    maybe_remove_file(args, raw_output_path)
-    maybe_remove_file(args, events_output_path)
-    return calibration_path
 
 
 def write_scaled_mip_calibration(
@@ -192,7 +120,7 @@ def write_scaled_mip_calibration(
         if thickness_mm <= 0.0:
             raise ValueError(f"{key} must be positive for {run_plan.geometry_variant.geometry_id}.")
         
-        # Linear scaling w/ thickness
+        # Scale the reference MIP linearly with scintillator thickness.
         mpv_gev = reference_mpv_gev * (thickness_mm / reference_thickness_mm)
         segment_thicknesses_mm.append(thickness_mm)
         mpvs.append(mpv_gev)
@@ -219,6 +147,17 @@ def write_scaled_mip_calibration(
     return calibration_path
 
 
+def _load_g4gps_metadata(spec_path: Path) -> Dict[str, Any]:
+    spec = load_g4gps_spec(spec_path)
+    return {
+        "g4gps_spec_path": str(spec_path),
+        "spectrum_id": spec.spec_id,
+        "spectrum_x_axis": spec.x_axis,
+        "spectrum_x_min_GeV": spec.x_min_GeV,
+        "spectrum_x_max_GeV": spec.x_max_GeV,
+    }
+
+
 # Run the detector simulation step for one planned sample and return its wall-clock time.
 def run_ddsim(args: argparse.Namespace, run_plan: RunPlan) -> float:
     """Fire ddsim for this plan and return the wall-clock seconds spent."""
@@ -242,7 +181,7 @@ def run_ddsim(args: argparse.Namespace, run_plan: RunPlan) -> float:
         "0*mm",
     ]
 
-    # Use a g4gps spec.
+    # Use the generated G4GPS macro path.
     if run_plan.beam_mode == "g4gps_spec":
         if run_plan.g4gps_spec_path is None or run_plan.macro_path is None:
             raise ValueError("G4GPS spec runs require g4gps_spec_path and macro_path.")
@@ -267,10 +206,10 @@ def run_ddsim(args: argparse.Namespace, run_plan: RunPlan) -> float:
             ]
         )
         
-    # Or... use the default particle gun.
+    # Otherwise use the default ddsim particle gun.
     else:
-        if run_plan.momentum_GeV is None:
-            raise ValueError("Fixed-gun runs require momentum_GeV.")
+        if run_plan.momentum_GeV is None or run_plan.gun_direction is None or run_plan.gun_position is None:
+            raise ValueError("Fixed-gun runs require momentum_GeV, gun_direction, and gun_position.")
         momentum_expression = f"{run_plan.momentum_GeV}*GeV"
         command.extend(
             [
@@ -299,7 +238,7 @@ def run_process(
     args: argparse.Namespace,
     run_plan: RunPlan,
     extra_process_flags: List[str],
-) -> Tuple[float, List[str]]:
+) -> float:
     """Invoke the processor on the raw EDM4hep file and report elapsed time."""
     ensure_dir(run_plan.events_path.parent)
 
@@ -316,7 +255,7 @@ def run_process(
         command.extend(["--expected-pdg", str(run_plan.expected_pdg)])
     start = time.time()
     run_cmd(command, dry_run=args.dry_run, label="process")
-    return time.time() - start, command
+    return time.time() - start
 
 
 # Write the minimal metadata that downstream analysis steps need to identify the run conditions.
@@ -335,12 +274,7 @@ def write_metadata(
     if run_plan.momentum_GeV is not None:
         payload["momentum_GeV"] = run_plan.momentum_GeV
     if run_plan.g4gps_spec_path is not None:
-        spec = load_g4gps_spec(run_plan.g4gps_spec_path)
-        payload["g4gps_spec_path"] = str(run_plan.g4gps_spec_path)
-        payload["spectrum_id"] = spec.spec_id
-        payload["spectrum_x_axis"] = spec.x_axis
-        payload["spectrum_x_min_GeV"] = spec.x_min_GeV
-        payload["spectrum_x_max_GeV"] = spec.x_max_GeV
+        payload.update(_load_g4gps_metadata(run_plan.g4gps_spec_path))
     if run_plan.macro_path is not None:
         payload["macro_path"] = str(run_plan.macro_path)
     start = time.time()
@@ -378,6 +312,26 @@ def write_run_manifests(run_records: List[RunRecord], json_path: Path, csv_path:
     """Write the compact run index used for output discovery."""
     ensure_dir(json_path.parent)
     rows = []
+    fieldnames = [
+        "geometry_id",
+        "run_id",
+        "particle",
+        "beam_mode",
+        "beam_label",
+        "momentum_GeV",
+        "spectrum_id",
+        "spectrum_x_axis",
+        "spectrum_x_min_GeV",
+        "spectrum_x_max_GeV",
+        "seed",
+        "status",
+        "raw_path",
+        "events_path",
+        "meta_path",
+        "calibration_path",
+        "performance_path",
+        "error",
+    ]
 
     # Build one manifest row per run so later tools can discover outputs without walking the data tree.
     for run_record in run_records:
@@ -402,38 +356,12 @@ def write_run_manifests(run_records: List[RunRecord], json_path: Path, csv_path:
             "error": run_record.error,
         }
         if run_record.plan.g4gps_spec_path is not None:
-            spec = load_g4gps_spec(run_record.plan.g4gps_spec_path)
-            row["spectrum_id"] = spec.spec_id
-            row["spectrum_x_axis"] = spec.x_axis
-            row["spectrum_x_min_GeV"] = spec.x_min_GeV
-            row["spectrum_x_max_GeV"] = spec.x_max_GeV
-        rows.append(
-            row
-        )
+            row.update(_load_g4gps_metadata(run_record.plan.g4gps_spec_path))
+        rows.append(row)
 
     # Keep both JSON and CSV forms so the manifest is easy to read by both scripts and spreadsheets.
     with json_path.open("w", encoding="utf-8") as json_file:
         json.dump({"runs": rows}, json_file, indent=2)
-    fieldnames = [
-        "geometry_id",
-        "run_id",
-        "particle",
-        "beam_mode",
-        "beam_label",
-        "momentum_GeV",
-        "spectrum_id",
-        "spectrum_x_axis",
-        "spectrum_x_min_GeV",
-        "spectrum_x_max_GeV",
-        "seed",
-        "status",
-        "raw_path",
-        "events_path",
-        "meta_path",
-        "calibration_path",
-        "performance_path",
-        "error",
-    ]
     with csv_path.open("w", newline="", encoding="utf-8") as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         writer.writeheader()

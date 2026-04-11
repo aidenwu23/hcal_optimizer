@@ -43,13 +43,9 @@ constraints:
   predicted: []
 
 scoring:
-  mode: "tradeoff"   # metric | tradeoff
-  expr: "neutron_efficiency"
+  mode: metric
+  metric: neutron_efficiency
   maximize: true
-
-  # Example if you want a tradeoff instead:
-  # expr: "neutron_efficiency"
-  # maximize: true
 
 diversity:
   min_l2_norm: 0.05

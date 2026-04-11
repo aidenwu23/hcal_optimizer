@@ -1,11 +1,14 @@
 """
+Build one run-level CSV row per processed geometry run.
+
 python3 surrogate/build_raw_csv.py \
   --processed-root data/processed \
   --out surrogate/campaigns/data.csv
 """
 
+import argparse
 import csv
-import argparse, json
+import json
 from pathlib import Path
 import sys
 
@@ -16,11 +19,41 @@ if str(PROJECT_DIRECTORY) not in sys.path:
 from simulation.helpers.geometry_index import eval_geometry_length_mm
 
 
+THICKNESS_COLUMNS = [
+    "t_absorber_seg1",
+    "t_absorber_seg2",
+    "t_absorber_seg3",
+    "t_scin_seg1",
+    "t_scin_seg2",
+    "t_scin_seg3",
+    "t_spacer",
+]
+
+PREFERRED_COLUMNS = [
+    "geometry_id",
+    "run_id",
+    "gun_particle",
+    "beam_mode",
+    "beam_label",
+    "momentum_GeV",
+    "spectrum_id",
+    "spectrum_x_axis",
+    "spectrum_x_min_GeV",
+    "spectrum_x_max_GeV",
+    "nLayers",
+    "seg1_layers",
+    "seg2_layers",
+    "seg3_layers",
+    *THICKNESS_COLUMNS,
+    "detection_efficiency",
+]
+
+
 def _extract(meta_p: Path, calibration_p: Path, perf_p: Path, geometry_root: Path) -> dict:
     # meta.json provides beam config, calibration.json provides threshold, and performance.json provides metrics.
-    meta = json.loads(meta_p.read_text())
-    json.loads(calibration_p.read_text())
-    perf = json.loads(perf_p.read_text())
+    meta = json.loads(meta_p.read_text(encoding="utf-8"))
+    json.loads(calibration_p.read_text(encoding="utf-8"))
+    perf = json.loads(perf_p.read_text(encoding="utf-8"))
 
     geometry_id = meta.get("geometry_id") or perf.get("geometry_id")
 
@@ -28,7 +61,7 @@ def _extract(meta_p: Path, calibration_p: Path, perf_p: Path, geometry_root: Pat
     geom_params = {}
     geom_json_path = geometry_root / geometry_id / "geometry.json"
     if geom_json_path.exists():
-        geom_params = json.loads(geom_json_path.read_text())
+        geom_params = json.loads(geom_json_path.read_text(encoding="utf-8"))
     else:
         print(f"[WARN] geometry.json not found for {geometry_id}: {geom_json_path}")
 
@@ -99,26 +132,14 @@ def main():
     if not rows:
         raise SystemExit("No (meta.json, calibration.json, performance.json) triples found.")
 
-    thickness_cols = ["t_absorber_seg1", "t_absorber_seg2", "t_absorber_seg3", "t_scin_seg1", "t_scin_seg2", "t_scin_seg3", "t_spacer"]
     for row in rows:
-        for column_name in thickness_cols:
+        for column_name in THICKNESS_COLUMNS:
             if column_name in row:
                 row[column_name] = _geometry_thickness_cm(row[column_name])
-    
-    preferred = [
-        "geometry_id", "run_id", "gun_particle",
-        "beam_mode", "beam_label", "momentum_GeV",
-        "spectrum_id", "spectrum_x_axis", "spectrum_x_min_GeV", "spectrum_x_max_GeV",
-        "nLayers",
-        "seg1_layers", "seg2_layers", "seg3_layers",
-        "t_absorber_seg1", "t_absorber_seg2", "t_absorber_seg3",
-        "t_scin_seg1", "t_scin_seg2", "t_scin_seg3",
-        "t_spacer",
-        "detection_efficiency",
-    ]
+
     out_p = Path(args.out)
     out_p.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = [column_name for column_name in preferred if any(column_name in row for row in rows)]
+    fieldnames = [column_name for column_name in PREFERRED_COLUMNS if any(column_name in row for row in rows)]
     for row in rows:
         for column_name in row:
             if column_name not in fieldnames:

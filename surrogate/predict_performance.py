@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from propose_bo import GEOM_VARS, SURROGATE_FEATURES, SURROGATE_TARGETS
+from surrogate.propose_bo import GEOM_VARS, SURROGATE_FEATURES, SURROGATE_TARGETS
 
 
 def parse_args() -> argparse.Namespace:
@@ -105,6 +105,22 @@ def safe_eval_expr(expr: str, local_vars: dict[str, object]) -> float:
     return float(eval(expr, {"__builtins__": {}}, local_vars))
 
 
+def build_feature_rows(
+    geometry_rows: list[dict[str, Any]],
+    feature_columns: list[str],
+) -> list[dict[str, float]]:
+    # Build one surrogate input row per geometry in the saved feature order.
+    feature_rows: list[dict[str, float]] = []
+    for geometry_row in geometry_rows:
+        feature_row: dict[str, float] = {}
+        for feature_name in feature_columns:
+            if feature_name not in GEOM_VARS:
+                raise ValueError(f"Cannot build prediction rows for unknown surrogate feature {feature_name!r}.")
+            feature_row[feature_name] = float(geometry_row[feature_name])
+        feature_rows.append(feature_row)
+    return feature_rows
+
+
 def main() -> None:
     args = parse_args()
 
@@ -114,19 +130,8 @@ def main() -> None:
 
     model, feature_columns, target_columns = load_model_bundle(model_path)
     specification = load_yaml_object(input_yaml_path)
-    geometry_rows = build_geometry_rows(specification)
-    prediction_rows = geometry_rows
-
-    # Build one feature row per geometry in the saved model feature order.
-    feature_rows: list[dict[str, float]] = []
-    for prediction_row in prediction_rows:
-        feature_row: dict[str, float] = {}
-        for feature_name in feature_columns:
-            if feature_name in GEOM_VARS:
-                feature_row[feature_name] = float(prediction_row[feature_name])
-            else:
-                raise ValueError(f"Cannot build prediction rows for unknown surrogate feature {feature_name!r}.")
-        feature_rows.append(feature_row)
+    prediction_rows = build_geometry_rows(specification)
+    feature_rows = build_feature_rows(prediction_rows, feature_columns)
 
     Xs_df = pd.DataFrame(feature_rows, columns=feature_columns)
     Y = np.asarray(model.predict(Xs_df))

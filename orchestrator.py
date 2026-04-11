@@ -9,7 +9,7 @@ python3 orchestrator.py \
   --training-csv surrogate/iterations/1-3_GeV/iteration_1/training_compact_0-1.csv \
   --run-level-csv surrogate/iterations/1-3_GeV/iteration_1/training_raw_0-1.csv \
   --model surrogate/model/1-3_GeV/lgbm_surrogate_0-1.joblib \
-  --bo-spec geometries/sweeps/bo_spec_1-3_GeV.yaml \
+  --bo-spec geometries/sweeps/bo_spec.yaml \
   --sweep-yaml geometries/sweeps/proposed/1-3_GeV/proposed_1.yaml \
   --pool 20000 \
   --bo-variants 5 \
@@ -166,12 +166,11 @@ def main() -> None:
 
     processed_root = Path(args.processed_root) if args.processed_root else None
     geometry_training_csv = Path(args.training_csv)
-    if args.run_level_csv:
-        run_level_csv = Path(args.run_level_csv)
-    else:
-        run_level_csv = geometry_training_csv.with_name(
-            f"{geometry_training_csv.stem}_runs{geometry_training_csv.suffix}"
-        )
+    run_level_csv = (
+        Path(args.run_level_csv)
+        if args.run_level_csv
+        else geometry_training_csv.with_name(f"{geometry_training_csv.stem}_runs{geometry_training_csv.suffix}")
+    )
     model_path = Path(args.model)
     spec_path = Path(args.bo_spec)
     sweep_yaml = Path(args.sweep_yaml)
@@ -201,7 +200,7 @@ def main() -> None:
     if not model_path.exists():
         raise FileNotFoundError(f"Surrogate model bundle not found: {model_path}")
 
-    # Propose a new batch of geometries by emitting yamls.
+    # Propose a new batch of geometries by emitting one sweep YAML.
     propose_next_geometries(
         model_path=model_path,
         spec_path=spec_path,

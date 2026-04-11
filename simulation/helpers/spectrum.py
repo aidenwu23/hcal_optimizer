@@ -4,7 +4,7 @@ Load G4GPS beam specs and format macros for DDsim.
 
 Example:
 python3 conductor.py --spec geometries/sweeps/nhcal.yaml \
-  --g4gps-spec simulation/g4gps/neutron_0.1-3_GeV.yaml
+  --g4gps-spec simulation/g4gps/neutron_0.1-3_GeV_KE.yaml
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from typing import List, Optional
 
 import yaml
 
+VALID_X_AXES = {"kinetic_energy_GeV", "momentum_GeV"}
 
 PARTICLE_MASS_GEV = {
     "neutron": 0.93956542052,
@@ -74,19 +75,46 @@ def _parse_vector_value(raw_value: object, *, label: str) -> str:
     raise ValueError(f"{label} must be a 3-value string or list.")
 
 
+def _particle_mass_gev(particle: str) -> float:
+    particle_key = particle.strip().lower()
+    if particle_key not in PARTICLE_MASS_GEV:
+        raise ValueError(f"Unsupported particle for momentum_GeV spec: {particle}")
+    return PARTICLE_MASS_GEV[particle_key]
+
+
 # Convert a momentum-axis point into the energy-axis value GPS expects for stable interpolation.
 def _x_value_to_energy_gev(particle: str, x_axis: str, x_value_gev: float) -> float:
     if x_axis == "kinetic_energy_GeV":
         return x_value_gev
 
-    particle_key = particle.strip().lower()
-    if particle_key not in PARTICLE_MASS_GEV:
-        raise ValueError(f"Unsupported particle for momentum_GeV spec: {particle}")
-
-    mass_gev = PARTICLE_MASS_GEV[particle_key]
+    mass_gev = _particle_mass_gev(particle)
     if mass_gev == 0.0:
         return x_value_gev
-    return math.sqrt((x_value_gev * x_value_gev) + (mass_gev * mass_gev)) - mass_gev
+    return math.hypot(x_value_gev, mass_gev) - mass_gev
+
+
+# Parse the selected spectrum axis and enforce increasing x values.
+def _load_spectrum_points(spec_path: Path, x_axis: str, raw_spectrum: dict[object, object]) -> List[SpectrumPoint]:
+    raw_x_values = raw_spectrum.get(x_axis)
+    raw_weights = raw_spectrum.get("weights")
+    
+    if not isinstance(raw_x_values, list) or not isinstance(raw_weights, list):
+        raise ValueError(f"{spec_path} energy_spectrum must define list {x_axis} and weights.")
+    if not raw_x_values:
+        raise ValueError(f"{spec_path} energy_spectrum must not be empty.")
+    if len(raw_x_values) != len(raw_weights):
+        raise ValueError(f"{spec_path} energy_spectrum {x_axis} and weights must have the same length.")
+
+    points: List[SpectrumPoint] = []
+    previous_x_value_gev = None
+    for raw_x_value, raw_weight in zip(raw_x_values, raw_weights):
+        x_value_gev = float(raw_x_value)
+        weight = float(raw_weight)
+        if previous_x_value_gev is not None and x_value_gev <= previous_x_value_gev:
+            raise ValueError(f"{spec_path} points must be in ascending x-axis order.")
+        points.append(SpectrumPoint(x_value_GeV=x_value_gev, weight=weight))
+        previous_x_value_gev = x_value_gev
+    return points
 
 
 def load_g4gps_spec(spec_path: Path) -> G4GPSSpec:
@@ -108,36 +136,13 @@ def load_g4gps_spec(spec_path: Path) -> G4GPSSpec:
     direction = _parse_vector_value(payload.get("direction", "0 0 -1"), label="direction")
     x_axis = str(payload.get("x_axis", "kinetic_energy_GeV")).strip()
     
-    if x_axis not in {"kinetic_energy_GeV", "momentum_GeV"}:
+    if x_axis not in VALID_X_AXES:
         raise ValueError(f"{spec_path} x_axis must be kinetic_energy_GeV or momentum_GeV.")
 
-    raw_energy_spectrum = payload.get("energy_spectrum")
-
-    if not isinstance(raw_energy_spectrum, dict):
+    raw_spectrum = payload.get("energy_spectrum")
+    if not isinstance(raw_spectrum, dict):
         raise ValueError(f"{spec_path} must define energy_spectrum.")
-
-    raw_energies = raw_energy_spectrum.get(x_axis)
-    raw_weights = raw_energy_spectrum.get("weights")
-
-    # More guards and checks
-    if not isinstance(raw_energies, list) or not isinstance(raw_weights, list):
-        raise ValueError(f"{spec_path} energy_spectrum must define list {x_axis} and weights.")
-    if not raw_energies:
-        raise ValueError(f"{spec_path} energy_spectrum must not be empty.")
-    if len(raw_energies) != len(raw_weights):
-        raise ValueError(f"{spec_path} energy_spectrum {x_axis} and weights must have the same length.")
-
-    points: List[SpectrumPoint] = []
-    previous_x_value_gev = None
-    for raw_energy, raw_weight in zip(raw_energies, raw_weights):
-        x_value_gev = float(raw_energy)
-        weight = float(raw_weight)
-
-        if previous_x_value_gev is not None and x_value_gev <= previous_x_value_gev:
-            raise ValueError(f"{spec_path} points must be in ascending x-axis order.")
-
-        points.append(SpectrumPoint(x_value_GeV=x_value_gev, weight=weight))
-        previous_x_value_gev = x_value_gev
+    points = _load_spectrum_points(spec_path, x_axis, raw_spectrum)
 
     interpolation = str(payload.get("interpolation", "Lin")).strip() or "Lin"
     raw_event_count = payload.get("events")

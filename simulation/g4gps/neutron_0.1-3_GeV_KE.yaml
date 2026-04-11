@@ -1,4 +1,4 @@
-spec_id: neutron_0.1_3.0_GeV
+spec_id: neutron_0.1-3_GeV_KE
 particle: neutron
 x_axis: kinetic_energy_GeV
 position: [0.0, 0.0, 0.0]

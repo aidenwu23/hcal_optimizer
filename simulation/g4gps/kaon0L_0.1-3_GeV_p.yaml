@@ -1,5 +1,5 @@
-spec_id: neutron_0.1-3_GeV_p
-particle: neutron
+spec_id: kaon0L_0.1-3_GeV_p
+particle: kaon0L
 x_axis: momentum_GeV
 position: [0.0, 0.0, 0.0]
 direction: [0.0, 0.0, -1.0]

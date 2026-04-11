@@ -30,11 +30,12 @@ python3 surrogate/propose_bo.py \
 from __future__ import annotations
 
 import argparse
-import os
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import joblib
 import numpy as np
+import pandas as pd
 import yaml
 
 # Check if PyTorch is available for Sobol sampling
@@ -84,6 +85,7 @@ def sobol_u01(n: int, d: int, seed: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
     return rng.random((n, d))
 
+
 def load_model_bundle(model_path: str) -> Tuple[Any, List[str], List[str]]:
     loaded_payload = joblib.load(model_path)
     if isinstance(loaded_payload, dict) and "model" in loaded_payload:
@@ -108,19 +110,19 @@ def parse_bounds(bounds_spec: Dict[str, Any], var_names: List[str]) -> Tuple[np.
     for name in var_names:
         if name not in bounds_spec:
             raise SystemExit(f"Missing bounds for '{name}' in bo_spec.yaml")
-        
+
         spec = bounds_spec[name]
         if isinstance(spec, dict):
-             low = float(spec["low"])
-             high = float(spec["high"])
-             meta.append(spec)
+            low = float(spec["low"])
+            high = float(spec["high"])
+            meta.append(spec)
         else:
-             low = float(spec[0])
-             high = float(spec[1])
-             meta.append({"type": "float"})
+            low = float(spec[0])
+            high = float(spec[1])
+            meta.append({"type": "float"})
         if high <= low:
             raise SystemExit(f"Invalid bounds for '{name}': low={low} high={high}")
-        
+
         lows.append(low)
         highs.append(high)
 
@@ -128,17 +130,16 @@ def parse_bounds(bounds_spec: Dict[str, Any], var_names: List[str]) -> Tuple[np.
 
 
 def apply_discreteness(X: np.ndarray, var_names: List[str], meta: List[Dict[str, Any]]) -> np.ndarray:
-     X2 = X.copy()
-     for j, (name, m) in enumerate(zip(var_names, meta)):
-         t = str(m.get("type", "float")).lower()
-         step = float(m.get("step", 1.0))
-         if t in ("int", "integer"):
-             X2[:, j] = np.round(X2[:, j] / step) * step
-             X2[:, j] = np.round(X2[:, j]).astype(int)
-         elif t == "discrete":
-             X2[:, j] = np.round(X2[:, j] / step) * step
-         # else float, do nothing
-     return X2 
+    X2 = X.copy()
+    for j, meta_entry in enumerate(meta):
+        discrete_type = str(meta_entry.get("type", "float")).lower()
+        step = float(meta_entry.get("step", 1.0))
+        if discrete_type in ("int", "integer"):
+            X2[:, j] = np.round(X2[:, j] / step) * step
+            X2[:, j] = np.round(X2[:, j]).astype(int)
+        elif discrete_type == "discrete":
+            X2[:, j] = np.round(X2[:, j] / step) * step
+    return X2
 
 
 def normalize01(X: np.ndarray, lows: np.ndarray, highs: np.ndarray) -> np.ndarray:
@@ -176,6 +177,14 @@ def diverse_topk(X: np.ndarray, scores: np.ndarray, k: int, min_dist: float, low
 # -------------------------------------------------------------------------------------------------
 def safe_eval_expr(expr: str, local_vars: Dict[str, Any]) -> bool:
     return bool(eval(expr, {"__builtins__": {}}, local_vars))
+
+
+def load_yaml_mapping(path: Path) -> Dict[str, Any]:
+    with path.open("r", encoding="utf-8") as input_file:
+        payload = yaml.safe_load(input_file) or {}
+    if not isinstance(payload, dict):
+        raise SystemExit(f"{path} must contain a top-level mapping.")
+    return payload
 
 
 def filter_design_constraints(X: np.ndarray, var_names: List[str], exprs: List[str]) -> np.ndarray:
@@ -275,11 +284,37 @@ def build_sweep_yaml(sweep_base: Dict[str, Any], X_geom: np.ndarray, geom_var_na
     return out
 
 
+def build_feature_rows(
+    X_geom: np.ndarray,
+    geom_var_names: List[str],
+    feature_columns: List[str],
+    fixed_features: Dict[str, Any],
+) -> List[Dict[str, float]]:
+    # Build one surrogate feature row per geometry candidate.
+    feature_rows: List[Dict[str, float]] = []
+    for geometry_values in X_geom:
+        geometry_feature_values = {
+            geom_var_names[j]: float(geometry_values[j]) for j in range(len(geom_var_names))
+        }
+        feature_row: Dict[str, float] = {}
+        for feature_name in feature_columns:
+            if feature_name in geometry_feature_values:
+                feature_row[feature_name] = geometry_feature_values[feature_name]
+            elif feature_name in fixed_features:
+                feature_row[feature_name] = float(fixed_features[feature_name])
+            else:
+                raise SystemExit(
+                    f"Cannot build surrogate feature rows because '{feature_name}' is missing."
+                )
+        feature_rows.append(feature_row)
+    return feature_rows
+
+
 # -------------------------------------------------------------------------------------------------
 # Main
 # -------------------------------------------------------------------------------------------------
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Propose next geometries (Option A) and write a sweep YAML.")
+    ap = argparse.ArgumentParser(description="Propose the next geometry batch and write a sweep YAML.")
     ap.add_argument("--model", required=True, help="Path to trained surrogate .joblib bundle.")
     ap.add_argument("--spec", required=True, help="Path to bo_spec.yaml.")
     ap.add_argument("--out", required=True, help="Output sweep YAML path.")
@@ -289,8 +324,9 @@ def main() -> None:
     args = ap.parse_args()
 
     # Load spec.
-    with open(args.spec, "r", encoding="utf-8") as f:
-        spec = yaml.safe_load(f) or {}
+    spec_path = Path(args.spec)
+    output_path = Path(args.out)
+    spec = load_yaml_mapping(spec_path)
 
     sweep_base = spec.get("sweep_base")
     if not isinstance(sweep_base, dict):
@@ -349,26 +385,7 @@ def main() -> None:
     if X_geom_d.shape[0] == 0:
         raise SystemExit("No candidates satisfy design constraints. Loosen constraints or increase bounds/pool.")
 
-    import pandas as pd
-
-    # Build one surrogate row per geometry.
-    feature_rows: List[Dict[str, float]] = []
-    for geometry_values in X_geom_d:
-        geometry_feature_values = {
-            geom_var_names[j]: float(geometry_values[j]) for j in range(len(geom_var_names))
-        }
-        feature_row: Dict[str, float] = {}
-        for feature_name in feature_columns:
-            if feature_name in geometry_feature_values:
-                feature_row[feature_name] = geometry_feature_values[feature_name]
-            elif feature_name in fixed_features:
-                feature_row[feature_name] = float(fixed_features[feature_name])
-            else:
-                raise SystemExit(
-                    f"Cannot build surrogate feature rows because '{feature_name}' is missing."
-                )
-        feature_rows.append(feature_row)
-
+    feature_rows = build_feature_rows(X_geom_d, geom_var_names, feature_columns, fixed_features)
     Xs_df = pd.DataFrame(feature_rows, columns=feature_columns)
 
     Y = np.asarray(model.predict(Xs_df))
@@ -400,11 +417,11 @@ def main() -> None:
     # Emit sweep YAML
     sweep_yaml = build_sweep_yaml(sweep_base, X_out, geom_var_names)
 
-    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
-    with open(args.out, "w", encoding="utf-8") as f:
-        yaml.safe_dump(sweep_yaml, f, sort_keys=False)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as output_file:
+        yaml.safe_dump(sweep_yaml, output_file, sort_keys=False)
 
-    print(f"Wrote {args.out} with {len(sweep_yaml['variants'])} variants "
+    print(f"Wrote {output_path} with {len(sweep_yaml['variants'])} variants "
           f"(sampled={X_geom.shape[0]}, design_ok={X_geom_d.shape[0]}, feasible={X_final.shape[0]}).")
 
 

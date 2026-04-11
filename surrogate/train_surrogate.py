@@ -1,39 +1,22 @@
 #!/usr/bin/env python3
 
 """
-train_surrogate.py
-
-Train a LightGBM-based surrogate model mapping calorimeter geometry
-(absorber/scintillator thickness, segmentation, etc.)
-to compact performance metrics.
-
-Targets:
-  - inferred from the compact training CSV
-  - metric standard-deviation columns are excluded automatically
-
-Usage: 
+Train a LightGBM surrogate from the compact geometry training CSV.
 
 python ./surrogate/train_surrogate.py \
   --training-csv ./surrogate/iterations/1-3_GeV/iteration_0/training_compact_0.csv \
   --output-model ./surrogate/model/1-3_GeV/lgbm_surrogate_0.joblib
-
-python ./surrogate/train_surrogate.py \
-  --training-csv ./surrogate/iterations/1-3_GeV/iteration_2/training_compact_0-2.csv \
-  --load-model ./surrogate/model/1-3_GeV/lgbm_surrogate_0.joblib \
-  --output-model ./surrogate/model/1-3_GeV/lgbm_surrogate_0-2.joblib
-
-
 """
 
 import argparse
 import os
+
 import joblib
 import pandas as pd
-
 from lightgbm import LGBMRegressor
+from sklearn.metrics import mean_absolute_percentage_error
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_absolute_percentage_error
 
 
 # -----------------------------------------------------------------------------------------
@@ -64,7 +47,7 @@ NON_TARGET_COLUMNS = {
 # Argument parsing
 # -----------------------------------------------------------------------------------------
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Train a LightGBM surrogate model on geometry performance metrics"
     )
@@ -118,11 +101,19 @@ def infer_target_columns(df: pd.DataFrame) -> list[str]:
     return target_columns
 
 
-# -----------------------------------------------------------------------------------------
-# Main training logic
-# -----------------------------------------------------------------------------------------
+def build_base_regressor(random_seed: int) -> LGBMRegressor:
+    return LGBMRegressor(
+        objective="regression",
+        n_estimators=500,
+        learning_rate=0.05,
+        num_leaves=31,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=random_seed,
+    )
 
-def main():
+
+def main() -> None:
     args = parse_args()
 
     # -------------------------
@@ -179,18 +170,7 @@ def main():
             model = loaded_payload
     else:
         print("Creating new LightGBM surrogate model")
-
-        base_regressor = LGBMRegressor(
-            objective="regression",
-            n_estimators=500,
-            learning_rate=0.05,
-            num_leaves=31,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            random_state=args.random_seed,
-        )
-
-        model = MultiOutputRegressor(base_regressor)
+        model = MultiOutputRegressor(build_base_regressor(args.random_seed))
 
     # -------------------------
     # Train model
@@ -223,8 +203,6 @@ def main():
     joblib.dump(payload, output_path)
 
     print(f"\nTrained surrogate model saved to: {output_path}")
-
-
 
 if __name__ == "__main__":
     main()

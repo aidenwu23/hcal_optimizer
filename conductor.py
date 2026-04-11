@@ -12,8 +12,7 @@ python3 conductor.py --spec geometries/sweeps/nhcal.yaml \
   --seeds 67 --delete-intermediates && \
 
 python3 conductor.py --spec geometries/sweeps/nhcal.yaml \
-  --g4gps-spec simulation/g4gps/neutron_0.1-3_GeV_p.yaml \
-  --steering-file simulation/ddsim/threading.py \
+  --g4gps-spec simulation/g4gps/neutron_spectrum_p.yaml \
   --events 5000 \
   --seeds 67 \
   --mip-alpha 0.5

@@ -246,7 +246,6 @@ def build_threshold_run_plan(
 def build_runtime_args(arguments: argparse.Namespace, muon_threshold_GeV: float) -> SimpleNamespace:
     return SimpleNamespace(
         delete_intermediates=False,
-        dry_run=False,
         root_bin=arguments.root_bin,
         muon_threshold=muon_threshold_GeV,
     )

@@ -1,0 +1,11 @@
+\appendix
+\section{Analysis Code}\label{app:analysis_code}
+
+\noindent The analysis workflow was implemented in a standalone repository containing the geometry-generation, simulation-control, event-processing, surrogate-modeling, and plotting 
+code used for this note. The main simulation driver is \texttt{conductor.py}, which materializes geometry variants, runs DDsim, applies the MIP-scaled threshold calibration, and 
+writes processed performance outputs. The optimization loop is handled by \texttt{orchestrator.py}, which rebuilds compact training tables, trains the LightGBM surrogate model, 
+scores observed geometries, and proposes additional candidates.
+
+\noindent Geometry inputs are stored under \path{geometries/}, with generated compact XML files and JSON parameter records written for each geometry. Event processing code is stored 
+under \path{simulation/processing/}, while calibration inputs and helpers are stored under \path{simulation/calibration/}. The plots used in this note were produced from the compact 
+training table in \path{docs/plots/data/} using the ROOT macros in \path{docs/plots/}.
